@@ -774,6 +774,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Сайт: подпись — сам адрес, одинаково понятный на всех 16 языках, переводить нечего.
+        let siteItem = NSMenuItem(title: "ruswitcher.app", action: #selector(openWebsite), keyEquivalent: "")
+        siteItem.target = self
+        siteItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+        menu.addItem(siteItem)
+
         let donateItem = NSMenuItem(title: L10n.menuDonate, action: #selector(openDonate), keyEquivalent: "")
         donateItem.target = self
         menu.addItem(donateItem)
@@ -1027,6 +1033,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func openWebsite() {
+        if let url = SettingsManager.websiteLink(medium: "menu") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Окно «Что нового» — один раз после обновления, на языке приложения.
     /// НЕ показываем на свежей установке (там визард первого запуска): отличаем по
     /// launchAtLoginAsked — он выставляется на первом запуске, значит приложение уже
@@ -1096,7 +1108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// аудитории (Telegram/VK — главные для RU), + копирование. Нативный NSSharingServicePicker
     /// на macOS для этого слаб (нет соцсетей/мессенджеров), поэтому свои web-intent'ы.
     private func buildShareSubmenu() -> NSMenu {
-        let link = SettingsManager.githubURL
+        // Делимся сайтом (там кнопка скачивания и описание), с меткой площадки для Метрики.
+        func link(_ medium: String) -> String {
+            SettingsManager.websiteLink(source: "share", medium: medium)?.absoluteString ?? SettingsManager.websiteURL
+        }
         let text = L10n.shareMessage
         let menu = NSMenu()
 
@@ -1108,13 +1123,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // (заголовок, icon-slug, base, параметры). icon: ключ ShareIcons или "sf:<symbol>".
         let targets: [(String, String, String, [(String, String)])] = [
-            ("Telegram", "telegram", "https://t.me/share/url",                 [("url", link), ("text", text)]),
-            ("VK",       "vk",       "https://vk.com/share.php",                [("url", link), ("title", text)]),
-            ("X",        "x",        "https://twitter.com/intent/tweet",        [("text", text), ("url", link)]),
-            ("WhatsApp", "whatsapp", "https://wa.me/",                          [("text", "\(text) \(link)")]),
-            ("Facebook", "facebook", "https://www.facebook.com/sharer/sharer.php", [("u", link)]),
-            ("Reddit",   "reddit",   "https://www.reddit.com/submit",           [("url", link), ("title", text)]),
-            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "RuSwitcher"), ("body", "\(text) \(link)")]),
+            ("Telegram", "telegram", "https://t.me/share/url",                 [("url", link("telegram")), ("text", text)]),
+            ("VK",       "vk",       "https://vk.com/share.php",                [("url", link("vk")), ("title", text)]),
+            ("X",        "x",        "https://twitter.com/intent/tweet",        [("text", text), ("url", link("x"))]),
+            ("WhatsApp", "whatsapp", "https://wa.me/",                          [("text", "\(text) \(link("whatsapp"))")]),
+            ("Facebook", "facebook", "https://www.facebook.com/sharer/sharer.php", [("u", link("facebook"))]),
+            ("Reddit",   "reddit",   "https://www.reddit.com/submit",           [("url", link("reddit")), ("title", text)]),
+            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "RuSwitcher"), ("body", "\(text) \(link("email"))")]),
         ]
         for (title, icon, base, params) in targets {
             guard let shareURL = Self.buildQueryURL(base, params) else { continue }
@@ -1174,7 +1189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func copyShareLink() {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString("\(L10n.shareMessage) \(SettingsManager.githubURL)", forType: .string)
+        let link = SettingsManager.websiteLink(source: "share", medium: "copy")?.absoluteString ?? SettingsManager.websiteURL
+        pb.setString("\(L10n.shareMessage) \(link)", forType: .string)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -166,6 +166,9 @@ enum L10n {
         currentLang = detectLanguage()
     }
 
+    /// Текущий язык интерфейса («ru», «en», …) — например, чтобы открыть сайт на том же языке.
+    static var languageCode: String { currentLang }
+
     private static func s(_ key: String) -> String {
         strings[currentLang]?[key] ?? strings["en"]![key] ?? key
     }

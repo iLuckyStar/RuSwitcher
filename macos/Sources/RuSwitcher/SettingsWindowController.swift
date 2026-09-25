@@ -387,6 +387,18 @@ final class SettingsWindowController {
         versionLabel.font = .systemFont(ofSize: 12)
         versionLabel.textColor = .secondaryLabelColor
         view.addSubview(versionLabel)
+        y -= 22
+
+        // Сайт — ссылкой под версией. Подпись — сам адрес: переводить нечего.
+        let siteLink = NSButton(title: "ruswitcher.app", target: self, action: #selector(openWebsite))
+        siteLink.isBordered = false
+        siteLink.attributedTitle = NSAttributedString(string: "ruswitcher.app", attributes: [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .font: NSFont.systemFont(ofSize: 12),
+        ])
+        siteLink.frame = NSRect(x: 20, y: y, width: 110, height: 18)
+        view.addSubview(siteLink)
         y -= 40
 
         // Кнопка "Звезда на GitHub"
@@ -871,6 +883,12 @@ final class SettingsWindowController {
 
     @objc private func openGitHub() {
         if let url = URL(string: SettingsManager.githubURL) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func openWebsite() {
+        if let url = SettingsManager.websiteLink(medium: "about") {
             NSWorkspace.shared.open(url)
         }
     }
