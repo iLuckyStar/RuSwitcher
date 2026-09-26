@@ -55,6 +55,14 @@ final class SettingsWindowController {
         tabView.addTabViewItem(createAboutTab())
 
         win.contentView = tabView
+        // Высота окна — по самой высокой вкладке (после fitToText вкладки разной высоты на разных
+        // языках). Не выше экрана: на маленьком экране низ самой длинной вкладки уйдёт под край.
+        let chrome = tabView.bounds.height - tabView.contentRect.height
+        let tallest = tabView.tabViewItems.compactMap { $0.view?.subviews.first?.frame.height }.max() ?? 700
+        var height = tallest + chrome
+        if let screen = NSScreen.main { height = min(height, screen.visibleFrame.height - 60) }
+        win.setContentSize(NSSize(width: 480, height: height))
+        win.center()
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -92,6 +100,155 @@ final class SettingsWindowController {
         content.autoresizingMask = [.minYMargin]
         outer.addSubview(content)
         return outer
+    }
+
+    // MARK: - Подгонка вёрстки под длину текста
+
+    /// Вкладки свёрстаны абсолютными фреймами, и длинные переводы обрезались: на 16 языках
+    /// нашлось 113 мест (проверка: site/tools/make_shots.sh --audit). После сборки вкладки
+    /// этот проход подгоняет её под фактический текст:
+    ///  • строки «подпись + список» — общая колонка подписей по самой длинной; если список
+    ///    при этом не влезает, подпись переносится на несколько строк;
+    ///  • многострочные пояснения и длинные чекбоксы получают нужную высоту (чекбоксы переносятся);
+    ///  • кнопки расширяются под текст, а ряд кнопок, который не влезает, встаёт в столбик;
+    ///  • всё, что ниже выросшего элемента, сдвигается вниз, высота вкладки — по содержимому.
+    private func fitToText(_ view: NSView) {
+        let left: CGFloat = 20, right: CGFloat = 440, gap: CGFloat = 8
+        let items = view.subviews.filter { !$0.isHidden }
+        guard !items.isEmpty else { return }
+        let topMargin = view.frame.height - (items.map { $0.frame.maxY }.max() ?? view.frame.height)
+
+        // Строки — элементы, чьи рамки заметно пересекаются по вертикали (подпись и список рядом).
+        func sameRow(_ a: NSRect, _ b: NSRect) -> Bool {
+            min(a.maxY, b.maxY) - max(a.minY, b.minY) > 0.3 * min(a.height, b.height)
+        }
+        var rows: [[NSView]] = []
+        for v in items.sorted(by: { $0.frame.maxY > $1.frame.maxY }) {
+            if let i = rows.firstIndex(where: { $0.contains { sameRow($0.frame, v.frame) } }) {
+                rows[i].append(v)
+            } else {
+                rows.append([v])
+            }
+        }
+        rows.sort { ($0.map { $0.frame.maxY }.max() ?? 0) > ($1.map { $0.frame.maxY }.max() ?? 0) }
+
+        var grow: [ObjectIdentifier: CGFloat] = [:]       // на сколько выросла высота (верх на месте)
+        func setHeight(_ v: NSView, _ h: CGFloat) {
+            let top = v.frame.maxY
+            grow[ObjectIdentifier(v), default: 0] += h - v.frame.height
+            v.frame = NSRect(x: v.frame.minX, y: top - h, width: v.frame.width, height: h)
+        }
+        func fitHeight(_ c: NSControl, width: CGFloat) -> CGFloat {
+            ceil(c.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10_000)).height ?? c.frame.height)
+        }
+        func makeWrapping(_ c: NSControl) {
+            c.cell?.wraps = true
+            c.cell?.lineBreakMode = .byWordWrapping
+            (c as? NSTextField)?.maximumNumberOfLines = 0
+        }
+
+        // 1. «Подпись + список»: одна колонка подписей на всю вкладку.
+        var pairs: [(label: NSTextField, popup: NSPopUpButton)] = []
+        for row in rows {
+            let labels = row.compactMap { $0 as? NSTextField }.filter { !$0.isEditable && $0.cell?.wraps != true }
+            let popups = row.compactMap { $0 as? NSPopUpButton }
+            if labels.count == 1, popups.count == 1, labels[0].frame.minX < popups[0].frame.minX {
+                pairs.append((labels[0], popups[0]))
+            }
+        }
+        if !pairs.isEmpty {
+            let popupNeed = min(pairs.map { ceil($0.popup.cell?.cellSize.width ?? 0) }.max() ?? 0, right - left - gap - 90)
+            let labelNeed = pairs.map { ceil($0.label.cell?.cellSize.width ?? 0) + 2 }.max() ?? 0
+            // Колонка не уже самого длинного слова: иначе слово рвётся по буквам («Դասավորությա / ն»).
+            let longestWord = pairs.flatMap { p in
+                p.label.stringValue.split(whereSeparator: \.isWhitespace).map { word in
+                    ceil(NSAttributedString(string: String(word), attributes: [.font: p.label.font ?? NSFont.systemFont(ofSize: 13)]).size().width) + 4
+                }
+            }.max() ?? 0
+            let column = min(labelNeed, max(90, right - left - gap - popupNeed))
+            if column >= longestWord {
+                for (label, popup) in pairs {
+                    label.frame = NSRect(x: left, y: label.frame.minY, width: column, height: label.frame.height)
+                    if ceil(label.cell?.cellSize.width ?? 0) + 2 > column {
+                        makeWrapping(label)
+                        setHeight(label, fitHeight(label, width: column))
+                    }
+                    let x = left + column + gap
+                    popup.frame = NSRect(x: x, y: popup.frame.minY, width: right - x, height: popup.frame.height)
+                }
+            } else {
+                // Подписи над списками, во всю ширину — одинаково для всей вкладки.
+                for (label, popup) in pairs {
+                    let top = max(label.frame.maxY, popup.frame.maxY)
+                    let rowHeight = top - min(label.frame.minY, popup.frame.minY)
+                    makeWrapping(label)
+                    let lh = fitHeight(label, width: right - left)
+                    label.frame = NSRect(x: left, y: top - lh, width: right - left, height: lh)
+                    popup.frame = NSRect(x: left, y: label.frame.minY - 4 - popup.frame.height,
+                                         width: right - left, height: popup.frame.height)
+                    grow[ObjectIdentifier(popup), default: 0] += (lh + 4 + popup.frame.height) - rowHeight
+                }
+            }
+        }
+
+        // 2. Многострочные пояснения и чекбоксы (кнопки без рамки) — высота по тексту.
+        for v in items {
+            if let tf = v as? NSTextField, !tf.isEditable, tf.cell?.wraps == true {
+                let h = fitHeight(tf, width: tf.frame.width)
+                if h > tf.frame.height { setHeight(tf, h) }
+            } else if let b = v as? NSButton, !(b is NSPopUpButton), !b.isBordered, !b.title.isEmpty,
+                      ceil(b.cell?.cellSize.width ?? 0) > b.frame.width {
+                makeWrapping(b)
+                setHeight(b, max(b.frame.height, fitHeight(b, width: b.frame.width)))
+            }
+        }
+
+        // 3. Кнопки с рамкой: ширина по тексту; ряд, который не влезает, — в столбик на всю ширину.
+        for row in rows {
+            let buttons = row.compactMap { $0 as? NSButton }.filter { !($0 is NSPopUpButton) && $0.isBordered }
+                .sorted { $0.frame.minX < $1.frame.minX }
+            guard !buttons.isEmpty else { continue }
+            let need = buttons.map { ceil($0.cell?.cellSize.width ?? 0) + 2 }     // cellSize уже с полями кнопки
+            guard zip(buttons, need).contains(where: { $0.frame.width < $1 }) else { continue }
+            let start = buttons[0].frame.minX
+            let rowGap: CGFloat = buttons.count > 1 ? buttons[1].frame.minX - buttons[0].frame.maxX : 10
+            let gaps = rowGap * CGFloat(buttons.count - 1)
+            // прежние ширины, где хватает; если ряд так не влезает — точно по тексту
+            var widths = zip(buttons, need).map { max($0.frame.width, $1) }
+            if start + widths.reduce(0, +) + gaps > right { widths = need }
+            if start + widths.reduce(0, +) + gaps <= right {
+                var x = start
+                for (b, w) in zip(buttons, widths) {
+                    b.frame = NSRect(x: x, y: b.frame.minY, width: w, height: b.frame.height)
+                    x += w + rowGap
+                }
+            } else {
+                // столбиком: первая кнопка на месте, остальные ниже; рост ряда — на первой кнопке
+                let h = buttons[0].frame.height, step = h + 8
+                for (i, b) in buttons.enumerated() {
+                    b.frame = NSRect(x: start, y: buttons[0].frame.minY - CGFloat(i) * step, width: right - start, height: h)
+                }
+                grow[ObjectIdentifier(buttons[0]), default: 0] += step * CGFloat(buttons.count - 1)
+            }
+        }
+
+        // 4. Сдвиг вниз всего, что ниже выросших элементов.
+        var offset: CGFloat = 0
+        for row in rows {
+            var rowGrow: CGFloat = 0
+            for v in row {
+                v.frame.origin.y -= offset
+                rowGrow = max(rowGrow, grow[ObjectIdentifier(v)] ?? 0)
+            }
+            offset += rowGrow
+        }
+
+        // 5. Высота вкладки — по содержимому: прежний отступ сверху, 16 снизу.
+        let low = items.map { $0.frame.minY }.min() ?? 0
+        let high = items.map { $0.frame.maxY }.max() ?? 0
+        let height = topMargin + (high - low) + 16
+        for v in items { v.frame.origin.y += 16 - low }
+        view.frame = NSRect(x: view.frame.minX, y: view.frame.minY, width: view.frame.width, height: height)
     }
 
     private func createGeneralTab() -> NSTabViewItem {
@@ -272,6 +429,7 @@ final class SettingsWindowController {
         hotkeyLabel.textColor = .secondaryLabelColor
         view.addSubview(hotkeyLabel)
 
+        fitToText(view)
         item.view = topAligned(view)
         return item
     }
@@ -360,6 +518,7 @@ final class SettingsWindowController {
             set: { SettingsManager.shared.alwaysConvertWords = $0 },
             addWordPrompt: L10n.settingsAddWordPrompt))
 
+        fitToText(view)
         item.view = topAligned(view)
         return item
     }
@@ -397,7 +556,7 @@ final class SettingsWindowController {
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .font: NSFont.systemFont(ofSize: 12),
         ])
-        siteLink.frame = NSRect(x: 20, y: y, width: 110, height: 18)
+        siteLink.frame = NSRect(x: 9, y: y, width: 110, height: 18)   // у кнопки без рамки ~11 pt поля: текст ровно под заголовком
         view.addSubview(siteLink)
         y -= 40
 
@@ -427,6 +586,7 @@ final class SettingsWindowController {
         updateBtn.bezelStyle = .rounded
         view.addSubview(updateBtn)
 
+        fitToText(view)
         item.view = topAligned(view)
         return item
     }
@@ -567,6 +727,7 @@ final class SettingsWindowController {
         quitBtn.bezelStyle = .rounded
         view.addSubview(quitBtn)
 
+        fitToText(view)
         item.view = topAligned(view)
         return item
     }
