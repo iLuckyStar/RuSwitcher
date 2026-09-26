@@ -192,7 +192,7 @@ enum L10n {
             "menu.share.email": "Email",
             "share.message": "RuSwitcher — a free keyboard-layout switcher for macOS. Fix a wrong layout with a tap:",
             "whatsnew.title": "What's New in RuSwitcher",
-            "whatsnew.body": "• Change-case hotkey (like Punto): a separate hotkey cycles the case of the last word, a selection, or the whole line — UPPER → lower → Title. Off by default (Settings → General).\n• Hebrew conversion now works in right-to-left web fields (Chrome address bar, WhatsApp Web).\n• The Secure Input notice no longer steals focus while you type a password.\n• Faster typing: rare freezes eliminated and word replacement is now visually instant.",
+            "whatsnew.body": "• The menu bar icon can now be hidden completely (Settings → Advanced). To bring it back or open Settings, just launch RuSwitcher again.\n• The ⌥+⇧ (Option+Shift) combo - the familiar Windows Alt+Shift - can be assigned to layout switching, the conversion trigger and the change-case hotkey.\n• Russian - PC layout: punctuation on the /? key now converts correctly (tkrb? → елки,).\n• Our website is live: https://ruswitcher.app",
             "whatsnew.more": "Full release notes",
             "menu.quit": "Quit",
 
@@ -315,7 +315,7 @@ enum L10n {
             "menu.share.email": "Почта",
             "share.message": "RuSwitcher — бесплатный переключатель раскладки для macOS. Исправляет раскладку одним нажатием:",
             "whatsnew.title": "Что нового в RuSwitcher",
-            "whatsnew.body": "• Смена регистра по хоткею (как в Punto): отдельный хоткей циклит регистр последнего слова, выделения или всей строки — ВЕРХНИЙ → нижний → Заглавный. По умолчанию выключен (Настройки → Основные).\n• Иврит теперь конвертируется в RTL-веб-полях (адресная строка Chrome, WhatsApp Web).\n• Подсказка о защищённом вводе больше не крадёт фокус при вводе пароля.\n• Печать быстрее: убраны редкие «фризы», замена слова стала визуально мгновенной.",
+            "whatsnew.body": "• Иконку в меню-баре теперь можно полностью скрыть (Настройки → Расширенные). Вернуть её или открыть настройки - просто запустите RuSwitcher ещё раз.\n• Комбо ⌥+⇧ (Option+Shift) - привычное по Windows Alt+Shift - назначается на переключение раскладки, триггер конверсии и смену регистра.\n• Раскладка Русская - ПК: знаки на клавише /? теперь конвертируются правильно (tkrb? → елки,).\n• У нас появился сайт: https://ruswitcher.app",
             "whatsnew.more": "Подробнее на GitHub",
             "menu.quit": "Выход",
 
@@ -424,6 +424,11 @@ enum L10n {
 
         // ========== DEUTSCH ==========
         "de": [
+            "settings.hideIcon": "Menüleisten-Symbol ausblenden",
+            "settings.hideIcon.hint": "Um die Einstellungen zu öffnen oder das Symbol zurückzuholen, starten Sie RuSwitcher einfach erneut (Programme oder Spotlight).",
+            "settings.hideIcon.alert.title": "Menüleisten-Symbol ausblenden?",
+            "settings.hideIcon.alert.text": "RuSwitcher läuft im Hintergrund weiter. Um die Einstellungen zu öffnen oder das Symbol zurückzuholen, starten Sie RuSwitcher einfach erneut - per Doppelklick im Ordner Programme oder über Spotlight.",
+            "settings.quit": "RuSwitcher beenden",
             "menu.autoSwitch": "RuSwitcher aktivieren",
             "menu.checkPermissions": "Berechtigungen prüfen…",
             "menu.settings": "Einstellungen…",
@@ -537,6 +542,11 @@ enum L10n {
 
         // ========== FRANÇAIS ==========
         "fr": [
+            "settings.hideIcon": "Masquer l'icône de la barre de menus",
+            "settings.hideIcon.hint": "Pour ouvrir les Réglages ou faire réapparaître l'icône, relancez simplement RuSwitcher (Applications ou Spotlight).",
+            "settings.hideIcon.alert.title": "Masquer l'icône de la barre de menus ?",
+            "settings.hideIcon.alert.text": "RuSwitcher continuera de fonctionner en arrière-plan. Pour ouvrir les Réglages ou faire réapparaître l'icône, relancez simplement RuSwitcher - double-clic dans Applications ou via Spotlight.",
+            "settings.quit": "Quitter RuSwitcher",
             "menu.autoSwitch": "Activer RuSwitcher",
             "menu.checkPermissions": "Vérifier les autorisations…",
             "menu.settings": "Préférences…",
@@ -650,6 +660,11 @@ enum L10n {
 
         // ========== ESPAÑOL ==========
         "es": [
+            "settings.hideIcon": "Ocultar el icono de la barra de menús",
+            "settings.hideIcon.hint": "Para abrir Ajustes o recuperar el icono, simplemente vuelva a abrir RuSwitcher (Aplicaciones o Spotlight).",
+            "settings.hideIcon.alert.title": "¿Ocultar el icono de la barra de menús?",
+            "settings.hideIcon.alert.text": "RuSwitcher seguirá funcionando en segundo plano. Para abrir Ajustes o recuperar el icono, simplemente vuelva a abrir RuSwitcher: doble clic en Aplicaciones o búsquelo con Spotlight.",
+            "settings.quit": "Salir de RuSwitcher",
             "menu.autoSwitch": "Activar RuSwitcher",
             "menu.checkPermissions": "Verificar permisos…",
             "menu.settings": "Ajustes…",
@@ -763,6 +778,11 @@ enum L10n {
 
         // ========== PORTUGUÊS ==========
         "pt": [
+            "settings.hideIcon": "Ocultar o ícone da barra de menus",
+            "settings.hideIcon.hint": "Para abrir os Ajustes ou recuperar o ícone, basta abrir o RuSwitcher novamente (Aplicativos ou Spotlight).",
+            "settings.hideIcon.alert.title": "Ocultar o ícone da barra de menus?",
+            "settings.hideIcon.alert.text": "O RuSwitcher continuará funcionando em segundo plano. Para abrir os Ajustes ou recuperar o ícone, basta abrir o RuSwitcher novamente - clique duplo em Aplicativos ou via Spotlight.",
+            "settings.quit": "Encerrar o RuSwitcher",
             "menu.autoSwitch": "Ativar RuSwitcher",
             "menu.checkPermissions": "Verificar permissões…",
             "menu.settings": "Configurações…",
@@ -876,6 +896,11 @@ enum L10n {
 
         // ========== 中文 ==========
         "zh": [
+            "settings.hideIcon": "隐藏菜单栏图标",
+            "settings.hideIcon.hint": "要打开设置或恢复图标，只需再次启动 RuSwitcher（应用程序或聚焦搜索）。",
+            "settings.hideIcon.alert.title": "隐藏菜单栏图标？",
+            "settings.hideIcon.alert.text": "RuSwitcher 将继续在后台运行。要打开设置或恢复图标，只需再次启动 RuSwitcher：在应用程序中双击，或通过聚焦搜索找到它。",
+            "settings.quit": "退出 RuSwitcher",
             "menu.autoSwitch": "启用 RuSwitcher",
             "menu.checkPermissions": "检查权限…",
             "menu.settings": "设置…",
@@ -989,6 +1014,11 @@ enum L10n {
 
         // ========== 日本語 ==========
         "ja": [
+            "settings.hideIcon": "メニューバーのアイコンを隠す",
+            "settings.hideIcon.hint": "設定を開く、またはアイコンを戻すには、RuSwitcher をもう一度起動してください（アプリケーション/Spotlight）。",
+            "settings.hideIcon.alert.title": "メニューバーのアイコンを隠しますか？",
+            "settings.hideIcon.alert.text": "RuSwitcher はバックグラウンドで動作し続けます。設定を開く、またはアイコンを戻すには、RuSwitcher をもう一度起動してください（アプリケーションでダブルクリック、または Spotlight で検索）。",
+            "settings.quit": "RuSwitcher を終了",
             "menu.autoSwitch": "RuSwitcher を有効にする",
             "menu.checkPermissions": "権限を確認…",
             "menu.settings": "設定…",
@@ -1102,6 +1132,11 @@ enum L10n {
 
         // ========== 한국어 ==========
         "ko": [
+            "settings.hideIcon": "메뉴 막대 아이콘 숨기기",
+            "settings.hideIcon.hint": "설정을 열거나 아이콘을 되돌리려면 RuSwitcher를 다시 실행하세요(응용 프로그램 또는 Spotlight).",
+            "settings.hideIcon.alert.title": "메뉴 막대 아이콘을 숨기시겠습니까?",
+            "settings.hideIcon.alert.text": "RuSwitcher는 백그라운드에서 계속 실행됩니다. 설정을 열거나 아이콘을 되돌리려면 RuSwitcher를 다시 실행하세요. 응용 프로그램에서 이중 클릭하거나 Spotlight로 찾으세요.",
+            "settings.quit": "RuSwitcher 종료",
             "menu.autoSwitch": "RuSwitcher 사용",
             "menu.checkPermissions": "권한 확인…",
             "menu.settings": "설정…",
@@ -1215,6 +1250,11 @@ enum L10n {
 
         // ========== УКРАЇНСЬКА ==========
         "uk": [
+            "settings.hideIcon": "Приховувати іконку в меню-барі",
+            "settings.hideIcon.hint": "Щоб відкрити налаштування або повернути іконку, просто запустіть RuSwitcher ще раз (Програми або Spotlight).",
+            "settings.hideIcon.alert.title": "Приховати іконку з меню-бара?",
+            "settings.hideIcon.alert.text": "RuSwitcher продовжить працювати у фоні. Щоб відкрити налаштування або повернути іконку, просто запустіть RuSwitcher ще раз - подвійним клацанням у Програмах або через Spotlight.",
+            "settings.quit": "Завершити RuSwitcher",
             "menu.autoSwitch": "Увімкнути RuSwitcher",
             "menu.checkPermissions": "Перевірити дозволи…",
             "menu.settings": "Налаштування…",
@@ -1331,6 +1371,11 @@ enum L10n {
 
         // ========== БЕЛАРУСКАЯ ==========
         "be": [
+            "settings.hideIcon": "Хаваць іконку ў меню-бары",
+            "settings.hideIcon.hint": "Каб адкрыць налады або вярнуць іконку, проста запусціце RuSwitcher яшчэ раз (Праграмы або Spotlight).",
+            "settings.hideIcon.alert.title": "Схаваць іконку з меню-бара?",
+            "settings.hideIcon.alert.text": "RuSwitcher працягне працаваць у фоне. Каб адкрыць налады або вярнуць іконку, проста запусціце RuSwitcher яшчэ раз - падвойнай пстрычкай у Праграмах або праз Spotlight.",
+            "settings.quit": "Завяршыць RuSwitcher",
             "menu.autoSwitch": "Уключыць RuSwitcher",
             "menu.checkPermissions": "Праверыць дазволы…",
             "menu.settings": "Налады…",
@@ -1447,6 +1492,11 @@ enum L10n {
 
         // ========== POLSKI ==========
         "pl": [
+            "settings.hideIcon": "Ukryj ikonę na pasku menu",
+            "settings.hideIcon.hint": "Aby otworzyć Ustawienia lub przywrócić ikonę, po prostu uruchom RuSwitcher ponownie (Aplikacje lub Spotlight).",
+            "settings.hideIcon.alert.title": "Ukryć ikonę z paska menu?",
+            "settings.hideIcon.alert.text": "RuSwitcher będzie nadal działać w tle. Aby otworzyć Ustawienia lub przywrócić ikonę, po prostu uruchom RuSwitcher ponownie - podwójne kliknięcie w Aplikacjach albo przez Spotlight.",
+            "settings.quit": "Zakończ RuSwitcher",
             "menu.autoSwitch": "Włącz RuSwitcher",
             "menu.checkPermissions": "Sprawdź uprawnienia…",
             "menu.settings": "Ustawienia…",
@@ -1558,6 +1608,11 @@ enum L10n {
             "update.downloadFailed": "Nie można pobrać aktualizacji. Sprawdź połączenie z internetem.",
         ],
         "el": [
+            "settings.hideIcon": "Απόκρυψη εικονιδίου γραμμής μενού",
+            "settings.hideIcon.hint": "Για να ανοίξετε τις Ρυθμίσεις ή να επαναφέρετε το εικονίδιο, απλώς εκκινήστε ξανά το RuSwitcher (Εφαρμογές ή Spotlight).",
+            "settings.hideIcon.alert.title": "Απόκρυψη εικονιδίου γραμμής μενού;",
+            "settings.hideIcon.alert.text": "Το RuSwitcher θα συνεχίσει να λειτουργεί στο παρασκήνιο. Για να ανοίξετε τις Ρυθμίσεις ή να επαναφέρετε το εικονίδιο, απλώς εκκινήστε ξανά το RuSwitcher - διπλό κλικ στις Εφαρμογές ή μέσω Spotlight.",
+            "settings.quit": "Τερματισμός RuSwitcher",
             "menu.autoSwitch": "Ενεργοποίηση RuSwitcher",
             "menu.checkPermissions": "Έλεγχος δικαιωμάτων…",
             "menu.settings": "Ρυθμίσεις…",
@@ -1669,6 +1724,11 @@ enum L10n {
             "update.downloadFailed": "Δεν ήταν δυνατή η λήψη της ενημέρωσης. Ελέγξτε τη σύνδεσή σας στο διαδίκτυο.",
         ],
         "bg": [
+            "settings.hideIcon": "Скриване на иконата от лентата с менюта",
+            "settings.hideIcon.hint": "За да отворите настройките или да върнете иконата, просто стартирайте RuSwitcher отново (Програми или Spotlight).",
+            "settings.hideIcon.alert.title": "Да се скрие ли иконата от лентата с менюта?",
+            "settings.hideIcon.alert.text": "RuSwitcher ще продължи да работи във фонов режим. За да отворите настройките или да върнете иконата, просто стартирайте RuSwitcher отново - с двойно щракване в Програми или чрез Spotlight.",
+            "settings.quit": "Изход от RuSwitcher",
             "menu.autoSwitch": "Включи RuSwitcher",
             "menu.checkPermissions": "Проверка на разрешения…",
             "menu.settings": "Настройки…",
@@ -1780,6 +1840,11 @@ enum L10n {
             "update.downloadFailed": "Неуспешно изтегляне на актуализацията. Проверете интернет връзката си.",
         ],
         "hy": [
+            "settings.hideIcon": "Թաքցնել մենյուի տողի պատկերակը",
+            "settings.hideIcon.hint": "Կարգավորումները բացելու կամ պատկերակը վերադարձնելու համար պարզապես նորից գործարկեք RuSwitcher-ը (Ծրագրեր կամ Spotlight)։",
+            "settings.hideIcon.alert.title": "Թաքցնե՞լ մենյուի տողի պատկերակը",
+            "settings.hideIcon.alert.text": "RuSwitcher-ը կշարունակի աշխատել ֆոնային ռեժիմում։ Կարգավորումները բացելու կամ պատկերակը վերադարձնելու համար պարզապես նորից գործարկեք RuSwitcher-ը - կրկնակի սեղմումով Ծրագրեր պանակում կամ Spotlight-ի միջոցով։",
+            "settings.quit": "Փակել RuSwitcher-ը",
             "menu.autoSwitch": "Միացնել RuSwitcher",
             "menu.checkPermissions": "Ստուգել թույլտվությունները…",
             "menu.settings": "Կարգավորումներ…",
@@ -1891,6 +1956,11 @@ enum L10n {
             "update.downloadFailed": "Չհաջողվեց ներբեռնել թարմացումը: Ստուգեք ձեր ինտերնետ կապը.",
         ],
         "ka": [
+            "settings.hideIcon": "მენიუს ზოლის ხატულას დამალვა",
+            "settings.hideIcon.hint": "პარამეტრების გასახსნელად ან ხატულას დასაბრუნებლად უბრალოდ ხელახლა გაუშვით RuSwitcher (პროგრამები ან Spotlight).",
+            "settings.hideIcon.alert.title": "დავმალოთ მენიუს ზოლის ხატულა?",
+            "settings.hideIcon.alert.text": "RuSwitcher გააგრძელებს მუშაობას ფონურ რეჟიმში. პარამეტრების გასახსნელად ან ხატულას დასაბრუნებლად უბრალოდ ხელახლა გაუშვით RuSwitcher - ორმაგი დაწკაპუნებით პროგრამებში ან Spotlight-ით.",
+            "settings.quit": "RuSwitcher-ის დახურვა",
             "menu.autoSwitch": "RuSwitcher-ის ჩართვა",
             "menu.checkPermissions": "ნებართვების შემოწმება…",
             "menu.settings": "პარამეტრები…",
