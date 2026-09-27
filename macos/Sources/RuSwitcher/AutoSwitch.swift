@@ -113,7 +113,9 @@ enum LayoutDetector {
                 // тот же класс, что «думаю vs дума.» в 2.7.0). Словарю отдаём только
                 // целиком буквенный образ; иначе .undecided — ручной триггер работает.
                 guard converted.allSatisfy({ $0.isLetter }) else { return .undecided }
-                return Dict.isValidTarget(converted.lowercased(), lang: sideLang)
+                // Строгий системный словарь, не пак: второй проверки (набранного иврита) тут нет,
+                // и мусор субтитров («thi», «gus») портил бы правильно набранный иврит.
+                return Dict.isValidWord(converted.lowercased(), lang: sideLang)
                     ? .switchToConverted : .undecided
             }
             return Dict.isValidWord(typed.lowercased(), lang: sideLang) ? .keep : .undecided
@@ -143,17 +145,23 @@ enum LayoutDetector {
         // языка набранное считаем, только если это буквы (апостроф внутри допустим) с
         // возможной пунктуацией на конце: «he,» — англ. «he» с запятой, тут токенизация как
         // раз защищает от «руб».
-        if Dict.isAvailable(cur), looksLikeWord(typed), Dict.isValidWord(typed.lowercased(), lang: cur) {
-            return .keep
+        // Двухбуквенное тело с знаком («im.» → «шью» после разбора хвоста) словарь не
+        // различает, поэтому ещё и частотный список коротких слов текущего языка.
+        if Dict.isAvailable(cur), let body = wordBody(typed) {
+            if Dict.isValidWord(typed.lowercased(), lang: cur) { return .keep }
+            if body.count == 2, ShortWords.common(cur)?.contains(body.lowercased()) == true { return .keep }
         }
         return .switchToConverted
     }
 
-    static func looksLikeWord(_ s: String) -> Bool {
+    /// Тело слова без пунктуации на конце, если набранное похоже на слово (буквы, апостроф
+    /// внутри допустим); иначе nil.
+    static func wordBody(_ s: String) -> Substring? {
         let trailing: Set<Character> = [",", ".", "!", "?", ";", ":", ")"]
         var body = s[...]
         while let last = body.last, trailing.contains(last) { body = body.dropLast() }
-        return !body.isEmpty && body.allSatisfy { $0.isLetter || $0 == "'" || $0 == "’" }
+        guard !body.isEmpty, body.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" }) else { return nil }
+        return body
     }
 
     /// Знаки, которые не бывают ни частью слова, ни концом фразы сразу после слова.

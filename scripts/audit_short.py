@@ -22,8 +22,8 @@ def img_ru_to_en(w): return "".join(RU2EN.get(c, "?") for c in w)
 
 # ---- lists under test (must match ShortWords.swift) ----
 SHORT_RU = set("не ты на он мы вы да но за бы же из ну по то от их ее её со ли ни об ей во им ко те та уж ок эй "
-               "до ой ах ох ух эх хм ха".split())
-SHORT_EN = set("to it of is in we me he my on do no be so go if up at as an us or by am ok hi oh ah um mr ya vs dj kb jr bp ye ds".split())
+               "до ой ах ох ух эх хм ха ща".split())
+SHORT_EN = set("to it of is in we me he my on do no be so go if up at as an us or by am ok hi oh ah um mr ya vs dj kb jr bp ye ds jq im".split())
 
 # ---- reference of REAL 2-letter tokens (words + common abbreviations) ----
 # English: Scrabble TWL two-letter words + abbreviations common in prose.
@@ -32,10 +32,10 @@ REF_EN = set(("aa ab ad ae ag ah ai al am an ar as at aw ax ay ba be bi bo by da
               "ka ki la li lo ma me mi mm mo mu my na ne no nu od oe of oh oi om on op or "
               "os ow ox oy pa pe pi po qi re sh si so ta te ti to uh um un up ur us ut we "
               "wo xi xu ya ye yo za "
-              "vs dj tv kb mb gb jr sr mr ms dr st pm ds").split())
+              "vs dj tv kb mb gb jr sr mr ms dr st pm ds jq").split())
 # Russian: common real 2-letter words.
 REF_RU = set(("не ни но на ну ты вы мы он да за до по из от об во со то та ту те их им ей ею её ее "
-              "же ли бы ко уж ок ад ас ум ус юг юр эх ах ох ой эй яд як ял ил ел ем еж").split())
+              "же ли бы ко уж ок ад ас ум ус юг юр эх ах ох ой эй яд як ял ил ел ем еж ща").split())
 
 def check(name, ref, own, other_list, img):
     risks = []
@@ -61,7 +61,7 @@ for w in sorted(SHORT_EN):
         print(f"  en «{w}» <-> ru «{c}»")
 
 print("\n=== sanity: key conversions still fire ===")
-for t, expect in [("yt", "не"), ("ns", "ты"), ("yf", "на"), ("lf", "да"), ("lj", "до"), ("jq", "ой"), ("f[", "ах")]:
+for t, expect in [("yt", "не"), ("ns", "ты"), ("yf", "на"), ("lf", "да"), ("lj", "до"), ("f[", "ах")]:
     c = img_en_to_ru(t)
     fires = c in SHORT_RU and t not in SHORT_EN
     print(f"  type en '{t}' -> ru «{c}» converts? {fires} (want True; image==expect: {c==expect})")

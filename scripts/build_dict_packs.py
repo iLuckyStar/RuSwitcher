@@ -11,6 +11,8 @@ CC BY-SA 4.0, поэтому и паки распространяются под
 байтам UTF-8 (приложение ищет в них двоичным поиском), сжатые raw DEFLATE.
 Короче трёх букв слов нет: двухбуквенные решает ShortWords, однобуквенные не трогаем.
 Растянутые «ууу», «eee» (буква трижды подряд) — шум субтитров, отбрасываем.
+В русском отбрасываем и невозможное по орфографии («мьы», «асдеьэ» — это набор не в той
+раскладке): ь/ъ/ы в начале слова, ь/ъ после гласной или перед ь/ъ/ы.
 
 Размер выбран стендом автоконверсии: ru 50 тыс. и en 30 тыс. дают всю полноту, которую
 видно на корпусе; большие паки добавляют только ложные срабатывания на мусоре субтитров.
@@ -47,8 +49,10 @@ def source_lines(lang, src_dir):
 def build(lang, n, src_dir):
     pattern, words = LANGS[lang], []
     stretched = re.compile(r"(.)\1\1")
+    impossible = re.compile(r"^[ьъы]|[аеёиоуыэюя][ьъ]|[ьъ][ьъы]") if lang == "ru" else None
     for w, _ in source_lines(lang, src_dir):
-        if len(w) >= 3 and pattern.match(w) and not stretched.search(w):
+        if len(w) >= 3 and pattern.match(w) and not stretched.search(w) \
+                and not (impossible and impossible.search(w)):
             words.append(w)
             if len(words) >= n:
                 break

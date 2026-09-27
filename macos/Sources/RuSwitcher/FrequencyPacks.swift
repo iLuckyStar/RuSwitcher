@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Compression
 
 /// Словарь частых словоформ одного языка (скачиваемый пак, 3.5). Файл — слова в нижнем
 /// регистре по одному на строку, отсортированные по байтам UTF-8. Держим файл целиком и
@@ -102,6 +103,7 @@ enum FrequencyPacks {
         case badManifest
         case badPack(String)
         case noPacks
+        case cancelled
     }
 
     /// Установленные паки (по файлам метаданных рядом с паками).
@@ -124,10 +126,14 @@ enum FrequencyPacks {
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: data), manifest.format == 1 else {
             throw SyncError.badManifest
         }
+        // Словари могли выключить, пока шёл запрос: тогда ничего не пишем.
+        guard SettingsManager.shared.frequencyPacks else { throw SyncError.cancelled }
         let entries = manifest.packs.filter { wanted.contains($0.lang) && isSafeName($0.file) }
         guard !entries.isEmpty else { throw SyncError.noPacks }
 
-        let have = installed()
+        // Установленным считаем только пак, который действительно читается: битый файл
+        // при валидных метаданных скачаем заново.
+        let have = installed().filter { pack(for: $0.lang) != nil }
         try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
         defer { reload() }   // и после частичной неудачи: уже поставленные паки должны подхватиться
         for entry in entries where !have.contains(entry) {
@@ -136,6 +142,7 @@ enum FrequencyPacks {
             guard let (blob, resp) = try? await URLSession.shared.data(for: req),
                   (resp as? HTTPURLResponse)?.statusCode == 200 else { throw SyncError.network }
             let plain = try await Task.detached { try verify(blob, entry) }.value
+            guard SettingsManager.shared.frequencyPacks else { throw SyncError.cancelled }
             try plain.write(to: storeDirectory.appendingPathComponent("\(entry.lang).dict"), options: .atomic)
             try JSONEncoder().encode(entry).write(to: storeDirectory.appendingPathComponent("\(entry.lang).json"), options: .atomic)
             rslog("packs: installed \(entry.lang) v\(entry.version) (\(entry.count) words)")
@@ -147,6 +154,7 @@ enum FrequencyPacks {
         case installed([Entry])
         case noPacks
         case failed
+        case cancelled   // выключили, пока шла загрузка
     }
 
     /// Включить словари и скачать паки для текущей пары раскладок. Если скачать не вышло и
@@ -161,6 +169,8 @@ enum FrequencyPacks {
         } catch SyncError.noPacks {
             settings.frequencyPacks = false
             return .noPacks
+        } catch SyncError.cancelled {
+            return .cancelled
         } catch {
             rslog("packs: sync failed: \(error)")
             if installed().isEmpty { settings.frequencyPacks = false }
@@ -181,8 +191,13 @@ enum FrequencyPacks {
         let settings = SettingsManager.shared
         guard settings.frequencyPacks else { return }
         if let last = settings.frequencyPacksChecked, Date().timeIntervalSince(last) < 7 * 86400 { return }
-        if (try? await sync(languages: LayoutSwitcher.pairLanguages())) != nil {
+        do {
+            _ = try await sync(languages: LayoutSwitcher.pairLanguages())
             settings.frequencyPacksChecked = Date()
+        } catch SyncError.noPacks {
+            settings.frequencyPacksChecked = Date()   // для этой пары паков нет — не спрашиваем каждые 6 часов
+        } catch {
+            rslog("packs: refresh failed: \(error)")
         }
     }
 
@@ -192,9 +207,39 @@ enum FrequencyPacks {
         guard blob.count == entry.size, blob.count <= 8 << 20 else { throw SyncError.badPack(entry.lang) }
         let digest = SHA256.hash(data: blob).map { String(format: "%02x", $0) }.joined()
         guard digest == entry.sha256.lowercased() else { throw SyncError.badPack(entry.lang) }
-        guard let plain = try? (blob as NSData).decompressed(using: .zlib) as Data,
+        guard let plain = inflate(blob, limit: 16 << 20),
               let pack = WordPack(data: plain), pack.count == entry.count else { throw SyncError.badPack(entry.lang) }
         return plain
+    }
+
+    /// raw DEFLATE с потолком на размер результата: NSData.decompressed потолка не имеет,
+    /// а 8 МБ сжатых нулей разворачиваются в гигабайты.
+    nonisolated private static func inflate(_ blob: Data, limit: Int) -> Data? {
+        let stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
+        defer { stream.deallocate() }
+        guard compression_stream_init(stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else { return nil }
+        defer { compression_stream_destroy(stream) }
+        let chunk = 64 << 10
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: chunk)
+        defer { buffer.deallocate() }
+        var out = Data()
+        return blob.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Data? in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return nil }
+            stream.pointee.src_ptr = base
+            stream.pointee.src_size = blob.count
+            while true {
+                stream.pointee.dst_ptr = buffer
+                stream.pointee.dst_size = chunk
+                let status = compression_stream_process(stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                out.append(buffer, count: chunk - stream.pointee.dst_size)
+                if out.count > limit { return nil }
+                switch status {
+                case COMPRESSION_STATUS_END: return out
+                case COMPRESSION_STATUS_OK: continue
+                default: return nil
+                }
+            }
+        }
     }
 
     /// Имя файла из манифеста — только простое имя, без путей.
