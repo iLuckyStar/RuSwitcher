@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onTriggerChanged = { [weak self] in
             self?.reconfigureTap()
         }
+        settingsController.onFlagSizeChanged = { [weak self] in self?.updateStatusIcon() }
         settingsController.onAutoConvertChanged = { [weak self] enabled in
             self?.rebuildMenu()  // синхронизировать галочку в меню
             if enabled { self?.offerFrequencyPacksIfNeeded() }
@@ -936,9 +937,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem.button?.image = badgeImage(for: currentBadgeLabel())
         } else {
             statusItem.button?.image = nil
-            statusItem.button?.title = flag
+            statusItem.button?.attributedTitle = Self.flagTitle(flag, size: SettingsManager.shared.flagSize)
         }
         if changed { caretIndicator?.layoutChanged() }
+    }
+
+    /// Флаг-эмодзи для строки меню. Эмодзи сидит выше центра строки, и тем выше, чем крупнее
+    /// шрифт; поправки измерены по пикселям кнопки статус-айтема (флаги ru/ua/us одинаково):
+    /// системный размер −1 pt, 16 pt −2, 18 pt −2,5, 20 pt −3,5. Текстом, а не картинкой:
+    /// цветной эмодзи и Retina остаются за системой.
+    static func flagTitle(_ flag: String, size: Int) -> NSAttributedString {
+        let offsets: [Int: CGFloat] = [0: -1, 16: -2, 18: -2.5, 20: -3.5]
+        let font = size > 0 ? NSFont.systemFont(ofSize: CGFloat(size)) : NSFont.menuBarFont(ofSize: 0)
+        return NSAttributedString(string: flag, attributes: [.font: font, .baselineOffset: offsets[size] ?? 0])
     }
 
     /// Подпись монохромной плашки — родная аббревиатура языка, как у системного индикатора.

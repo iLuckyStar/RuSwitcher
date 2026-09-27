@@ -31,6 +31,7 @@ final class SettingsWindowController {
     var onRemoteDesktopChanged: ((Bool) -> Void)?
     var onCaretFlagChanged: ((Bool) -> Void)?
     var onHideIconChanged: ((Bool) -> Void)?
+    var onFlagSizeChanged: (() -> Void)?
 
     func showWindow() {
         if let window {
@@ -780,6 +781,22 @@ final class SettingsWindowController {
         view.addSubview(hideIconHint)
         y -= 47
 
+        // Размер флага в меню-баре (идея из форка landco-debug). Для монохромной плашки не нужен.
+        let flagLabel = NSTextField(labelWithString: L10n.settingsFlagSize)
+        flagLabel.frame = NSRect(x: 20, y: y, width: 150, height: 22)
+        view.addSubview(flagLabel)
+        let flagPopup = NSPopUpButton(frame: NSRect(x: 175, y: y - 2, width: 255, height: 26))
+        for size in SettingsManager.flagSizes {
+            flagPopup.addItem(withTitle: size == 0 ? L10n.settingsFlagSizeStandard : "\(size) pt")
+            flagPopup.menu?.items.last?.tag = size
+        }
+        flagPopup.selectItem(withTag: SettingsManager.shared.flagSize)
+        flagPopup.isEnabled = !SettingsManager.shared.monochromeIcon
+        flagPopup.target = self
+        flagPopup.action = #selector(flagSizeChanged)
+        view.addSubview(flagPopup)
+        y -= 40
+
         // Debug log
         let debugCheckbox = NSButton(checkboxWithTitle: L10n.settingsDebugLog, target: self, action: #selector(debugLogChanged))
         debugCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 22)
@@ -841,6 +858,11 @@ final class SettingsWindowController {
         }
         SettingsManager.shared.hideMenuBarIcon = hide
         onHideIconChanged?(hide)
+    }
+
+    @objc private func flagSizeChanged(_ sender: NSPopUpButton) {
+        SettingsManager.shared.flagSize = sender.selectedItem?.tag ?? 0
+        onFlagSizeChanged?()
     }
 
     @objc private func quitApp() {
