@@ -43,6 +43,7 @@ final class SettingsManager: @unchecked Sendable {
         static let keySound = "com.ruswitcher.keySound"
         static let caretFlag = "com.ruswitcher.caretFlag"
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
+        static let hideMenuBarIcon = "com.ruswitcher.hideMenuBarIcon"
         static let monochromeIcon = "com.ruswitcher.monochromeIcon"
         static let deniedAppsAdded = "com.ruswitcher.deniedAppsAdded"
         static let deniedAppsRemoved = "com.ruswitcher.deniedAppsRemoved"
@@ -237,6 +238,15 @@ final class SettingsManager: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Keys.secureInputNotice) }
     }
 
+    /// Полностью скрыть иконку из меню-бара (запрос пользователя: «значок мозолит глаз»).
+    /// По умолчанию ВЫКЛ. Путь назад — повторный запуск приложения: reopen-обработчик
+    /// открывает Настройки (см. applicationShouldHandleReopen). Аварийный сброс:
+    /// defaults delete com.ruswitcher.app com.ruswitcher.hideMenuBarIcon
+    var hideMenuBarIcon: Bool {
+        get { defaults.bool(forKey: Keys.hideMenuBarIcon) }
+        set { defaults.set(newValue, forKey: Keys.hideMenuBarIcon) }
+    }
+
     var caretFlag: Bool {
         get { defaults.bool(forKey: Keys.caretFlag) }
         set { defaults.set(newValue, forKey: Keys.caretFlag) }
@@ -336,6 +346,24 @@ final class SettingsManager: @unchecked Sendable {
     static let githubOwner = "rashn"
     static let githubRepo = "RuSwitcher"
     static var githubURL: String { "https://github.com/\(githubOwner)/\(githubRepo)" }
+    /// Сайт проекта. Правило то же, по которому сайт сам выбирает язык по системе: русский,
+    /// украинский, белорусский и страны СНГ (по языку интерфейса или по региону системы) ведут
+    /// на русскую версию, все остальные — на английскую. Грузия из СНГ вышла.
+    static let websiteURL = "https://ruswitcher.app"
+    private static let russianSiteLanguages: Set<String> = ["ru", "uk", "be", "kk", "ky", "uz", "tg", "tk", "az", "hy"]
+    private static let cisRegions: Set<String> = ["RU", "BY", "KZ", "KG", "UZ", "TJ", "TM", "AZ", "AM", "MD"]
+    /// Ссылка на страницу сайта с UTM-метками места в программе (menu, about, updater, share…):
+    /// по ним в Метрике видно, откуда пришёл человек. Метка уходит только при переходе
+    /// по ссылке, которую человек открыл сам, — программа по-прежнему ничего не отправляет.
+    /// URL собирается из константы, а не из сетевого фида (апдейтер фиду не доверяет).
+    static func websiteLink(_ page: String = "", source: String = "app", medium: String) -> URL? {
+        let region = Locale.current.region?.identifier ?? ""
+        let russian = russianSiteLanguages.contains(L10n.languageCode) || cisRegions.contains(region)
+        var comps = URLComponents(string: websiteURL + (russian ? "/" : "/en/") + (page.isEmpty ? "" : page + "/"))
+        comps?.queryItems = [URLQueryItem(name: "utm_source", value: source),
+                             URLQueryItem(name: "utm_medium", value: medium)]
+        return comps?.url
+    }
     /// Email для «Связаться с разработчиком» (mailto с предзаполнением). Пусто → кнопка
     /// открывает GitHub Issues как фолбэк.
     static let contactEmail = "r@nasibulin.ru"

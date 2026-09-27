@@ -152,7 +152,8 @@ enum UpdateChecker {
         guard let expectedSHA = info.sha256, !expectedSHA.isEmpty else {
             rslog("Update: no sha256 in version.json — falling back to browser download")
             // URL строим локально, а не из фида: фиду установщик не доверяет нигде.
-            if let url = URL(string: "\(SettingsManager.githubURL)/releases/latest") {
+            // Страница скачивания сайта: там зеркало, если GitHub недоступен.
+            if let url = SettingsManager.websiteLink("download", medium: "updater") {
                 NSWorkspace.shared.open(url)
             }
             return
@@ -387,8 +388,9 @@ enum UpdateChecker {
         alert.addButton(withTitle: L10n.updateLater)
         // URL строим локально из константы, а НЕ из info.url: фид приходит по сети,
         // и остальной установщик ему сознательно не доверяет (ревью-находка).
+        // Сайт, а не GitHub: скачивание чаще всего срывается как раз из-за недоступного GitHub.
         if alert.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "\(SettingsManager.githubURL)/releases/latest") {
+           let url = SettingsManager.websiteLink("download", medium: "updater") {
             NSWorkspace.shared.open(url)
         }
     }

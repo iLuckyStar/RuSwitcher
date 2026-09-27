@@ -40,6 +40,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             Task { @MainActor in Dict.warmUp() }
         }
+
+        // Скрытая иконка: reopen-событие приходит только УЖЕ работающему приложению.
+        // Свежий РУЧНОЙ запуск со скрытой иконкой без этого блока «тих» (ни иконки, ни
+        // окна — выглядит как «не запустилось»). Показываем настройки; автологин-старт
+        // (флаг login-item в oapp Apple event) остаётся тихим, как и положено.
+        if SettingsManager.shared.hideMenuBarIcon && !Self.launchedAsLoginItem() {
+            settingsController.showWindow()
+        }
+    }
+
+    /// Запущены ли мы как login item (автостарт): loginwindow помечает oapp-событие
+    /// флагом keyAELaunchedAsLogInItem в propData.
+    private static func launchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+            == OSType(keyAELaunchedAsLogInItem)
     }
 
     private func setupSettingsCallbacks() {
@@ -73,6 +90,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.rebuildMenu()          // синхронизировать галочку в меню
             self?.syncCaretIndicator()   // создать/снести индикатор + обновить гейт onUserInput
         }
+        settingsController.onHideIconChanged = { [weak self] hide in
+            self?.statusItem.isVisible = !hide
+        }
+    }
+
+    /// Повторный запуск приложения (двойной клик в «Программах», Spotlight, Launchpad) —
+    /// стандартный для menu-bar-утилит путь добраться до настроек при СКРЫТОЙ иконке.
+    /// Открываем настройки и при видимой иконке: reopen без реакции выглядит как «не работает».
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settingsController.showWindow()
+        return false
     }
 
     // MARK: - Learn-from-undo (предложить добавить слово в never-convert)
@@ -586,8 +614,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         rslog("auto: convert \(keys.count) keys (+\(suffix.count) punct, +\(bc) sp)")
+        // issue #33: хвост-знак конвертим сквозь пару, когда с обеих сторон знак
+        // (Русская — ПК: «tkrb?» → «елки,»); буква по ту сторону — литерал (issue #15).
+        // Скептик (HIGH): на удалёнке клавиши приходят символами (char-only), направление
+        // определено по СКРИПТУ, а локальная раскладка может быть любой — карта пары дала бы
+        // мусор (RU '?'→'&'). Для проброшенного текста суффикс остаётся литералом.
+        let convertedSuffix = keys.allSatisfy({ $0.char != nil })
+            ? suffix : DynamicKeyMapping.punctThroughCurrentPair(suffix)
         if textConverter.convert(wordKeys: [], prevWordKeys: keys, boundaryCount: bc,
-                                 passthroughSuffix: suffix) {
+                                 passthroughSuffix: convertedSuffix, typedSuffix: suffix) {
             keyboardMonitor.markConverted()
             LayoutSwitcher.switchToOpposite()
             updateStatusIcon()
@@ -644,6 +679,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Иконку можно полностью скрыть (Настройки → Расширенные). isVisible вместо
+        // removeStatusItem: система помнит позицию, а объект живёт — все пути обновления
+        // (updateStatusIcon/rebuildMenu) продолжают работать без nil-проверок.
+        statusItem.isVisible = !SettingsManager.shared.hideMenuBarIcon
         rebuildMenu()
         // issue #9: иконка должна отражать раскладку и при СИСТЕМНОЙ смене (стандартный/
         // переопределённый хоткей), а не только при нашей конверсии. Слушаем системное
@@ -734,6 +773,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(updateItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        // Сайт: подпись — сам адрес, одинаково понятный на всех 16 языках, переводить нечего.
+        let siteItem = NSMenuItem(title: "ruswitcher.app", action: #selector(openWebsite), keyEquivalent: "")
+        siteItem.target = self
+        siteItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+        menu.addItem(siteItem)
 
         let donateItem = NSMenuItem(title: L10n.menuDonate, action: #selector(openDonate), keyEquivalent: "")
         donateItem.target = self
@@ -988,6 +1033,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func openWebsite() {
+        if let url = SettingsManager.websiteLink(medium: "menu") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Окно «Что нового» — один раз после обновления, на языке приложения.
     /// НЕ показываем на свежей установке (там визард первого запуска): отличаем по
     /// launchAtLoginAsked — он выставляется на первом запуске, значит приложение уже
@@ -1057,7 +1108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// аудитории (Telegram/VK — главные для RU), + копирование. Нативный NSSharingServicePicker
     /// на macOS для этого слаб (нет соцсетей/мессенджеров), поэтому свои web-intent'ы.
     private func buildShareSubmenu() -> NSMenu {
-        let link = SettingsManager.githubURL
+        // Делимся сайтом (там кнопка скачивания и описание), с меткой площадки для Метрики.
+        func link(_ medium: String) -> String {
+            SettingsManager.websiteLink(source: "share", medium: medium)?.absoluteString ?? SettingsManager.websiteURL
+        }
         let text = L10n.shareMessage
         let menu = NSMenu()
 
@@ -1069,13 +1123,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // (заголовок, icon-slug, base, параметры). icon: ключ ShareIcons или "sf:<symbol>".
         let targets: [(String, String, String, [(String, String)])] = [
-            ("Telegram", "telegram", "https://t.me/share/url",                 [("url", link), ("text", text)]),
-            ("VK",       "vk",       "https://vk.com/share.php",                [("url", link), ("title", text)]),
-            ("X",        "x",        "https://twitter.com/intent/tweet",        [("text", text), ("url", link)]),
-            ("WhatsApp", "whatsapp", "https://wa.me/",                          [("text", "\(text) \(link)")]),
-            ("Facebook", "facebook", "https://www.facebook.com/sharer/sharer.php", [("u", link)]),
-            ("Reddit",   "reddit",   "https://www.reddit.com/submit",           [("url", link), ("title", text)]),
-            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "RuSwitcher"), ("body", "\(text) \(link)")]),
+            ("Telegram", "telegram", "https://t.me/share/url",                 [("url", link("telegram")), ("text", text)]),
+            ("VK",       "vk",       "https://vk.com/share.php",                [("url", link("vk")), ("title", text)]),
+            ("X",        "x",        "https://twitter.com/intent/tweet",        [("text", text), ("url", link("x"))]),
+            ("WhatsApp", "whatsapp", "https://wa.me/",                          [("text", "\(text) \(link("whatsapp"))")]),
+            ("Facebook", "facebook", "https://www.facebook.com/sharer/sharer.php", [("u", link("facebook"))]),
+            ("Reddit",   "reddit",   "https://www.reddit.com/submit",           [("url", link("reddit")), ("title", text)]),
+            (L10n.menuShareEmail, "sf:envelope", "mailto:",                     [("subject", "RuSwitcher"), ("body", "\(text) \(link("email"))")]),
         ]
         for (title, icon, base, params) in targets {
             guard let shareURL = Self.buildQueryURL(base, params) else { continue }
@@ -1135,7 +1189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func copyShareLink() {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString("\(L10n.shareMessage) \(SettingsManager.githubURL)", forType: .string)
+        let link = SettingsManager.websiteLink(source: "share", medium: "copy")?.absoluteString ?? SettingsManager.websiteURL
+        pb.setString("\(L10n.shareMessage) \(link)", forType: .string)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
