@@ -31,6 +31,13 @@ final class SettingsManager: @unchecked Sendable {
         static let caseHotkey = "com.ruswitcher.caseHotkey"       // issue #29
         static let caseDoubleTap = "com.ruswitcher.caseDoubleTap"
         static let caseRightOnly = "com.ruswitcher.caseRightOnly"
+        // 3.5: сторона «только левая» (правая — прежние *RightOnly) и новые хоткеи
+        static let triggerLeftOnly = "com.ruswitcher.triggerLeftOnly"
+        static let switchLeftOnly = "com.ruswitcher.switchLeftOnly"
+        static let caseLeftOnly = "com.ruswitcher.caseLeftOnly"
+        static func hotkeyKey(_ slot: String) -> String { "com.ruswitcher.hotkey.\(slot).key" }
+        static func hotkeySide(_ slot: String) -> String { "com.ruswitcher.hotkey.\(slot).side" }
+        static func hotkeyDouble(_ slot: String) -> String { "com.ruswitcher.hotkey.\(slot).double" }
         static let autoConvert = "com.ruswitcher.autoConvert"
         static let smartConversion = "com.ruswitcher.smartConversion"
         static let convertByText = "com.ruswitcher.convertByText"
@@ -195,6 +202,52 @@ final class SettingsManager: @unchecked Sendable {
     var caseRightOnly: Bool {
         get { defaults.bool(forKey: Keys.caseRightOnly) }
         set { defaults.set(newValue, forKey: Keys.caseRightOnly) }
+    }
+
+    /// Все хоткеи одним способом (3.5). Триггер, смена раскладки и регистр живут в прежних
+    /// ключах (обратная совместимость), новые — в com.ruswitcher.hotkey.<слот>.*.
+    func hotkey(_ slot: HotkeySlot) -> HotkeySetting {
+        func side(right: Bool, left: String) -> HotkeySide {
+            right ? .right : (defaults.bool(forKey: left) ? .left : .any)
+        }
+        switch slot {
+        case .trigger:
+            return HotkeySetting(key: triggerKey, side: side(right: triggerRightOnly, left: Keys.triggerLeftOnly), doubleTap: triggerDoubleTap)
+        case .switchLayout:
+            return HotkeySetting(key: switchHotkey, side: side(right: switchRightOnly, left: Keys.switchLeftOnly), doubleTap: switchDoubleTap)
+        case .changeCase:
+            return HotkeySetting(key: caseHotkey, side: side(right: caseRightOnly, left: Keys.caseLeftOnly), doubleTap: caseDoubleTap)
+        case .layout1, .layout2, .addException:
+            let id = slot.rawValue
+            return HotkeySetting(key: defaults.string(forKey: Keys.hotkeyKey(id)) ?? "",
+                                 side: HotkeySide(rawValue: defaults.string(forKey: Keys.hotkeySide(id)) ?? "") ?? .any,
+                                 doubleTap: defaults.bool(forKey: Keys.hotkeyDouble(id)))
+        }
+    }
+
+    func setHotkey(_ slot: HotkeySlot, _ value: HotkeySetting) {
+        switch slot {
+        case .trigger:
+            triggerKey = value.key.isEmpty ? "option" : value.key
+            triggerRightOnly = value.side == .right
+            defaults.set(value.side == .left, forKey: Keys.triggerLeftOnly)
+            triggerDoubleTap = value.doubleTap
+        case .switchLayout:
+            switchHotkey = value.key
+            switchRightOnly = value.side == .right
+            defaults.set(value.side == .left, forKey: Keys.switchLeftOnly)
+            switchDoubleTap = value.doubleTap
+        case .changeCase:
+            caseHotkey = value.key
+            caseRightOnly = value.side == .right
+            defaults.set(value.side == .left, forKey: Keys.caseLeftOnly)
+            caseDoubleTap = value.doubleTap
+        case .layout1, .layout2, .addException:
+            let id = slot.rawValue
+            defaults.set(value.key, forKey: Keys.hotkeyKey(id))
+            defaults.set(value.side.rawValue, forKey: Keys.hotkeySide(id))
+            defaults.set(value.doubleTap, forKey: Keys.hotkeyDouble(id))
+        }
     }
 
     /// Caps Lock как триггер требует consume-tap (чтобы подавить переключение регистра).

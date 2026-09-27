@@ -15,8 +15,9 @@ final class SettingsWindowController {
     private var layout1Popup: NSPopUpButton?
     private var layout2Popup: NSPopUpButton?
     private var languagePopup: NSPopUpButton?
-    private var switchHotkeyPopup: NSPopUpButton?   // issue #20/#3: пере-populate при смене триггера
-    private var caseHotkeyPopup: NSPopUpButton?     // issue #29
+    private var hotkeyPopups: [HotkeySlot: NSPopUpButton] = [:]
+    private var hotkeySidePopups: [HotkeySlot: NSPopUpButton] = [:]
+    private var hotkeyDoubleChecks: [HotkeySlot: NSButton] = [:]
     private var exceptionEditors: [ExceptionListEditor] = []
     private var freqPacksCheckbox: NSButton?
     private var freqPacksStatus: NSTextField?
@@ -52,6 +53,7 @@ final class SettingsWindowController {
         tabView.autoresizingMask = [.width, .height]
 
         tabView.addTabViewItem(createGeneralTab())
+        tabView.addTabViewItem(createHotkeysTab())      // 3.5: все хоткеи на одной вкладке
         tabView.addTabViewItem(createAdvancedTab())     // «Расширенные» — сразу после «Основных»
         tabView.addTabViewItem(createExceptionsTab())
         tabView.addTabViewItem(createAboutTab())
@@ -268,91 +270,6 @@ final class SettingsWindowController {
         autoSwitchCheckbox = autoSwitch
         y -= 30
 
-        // Триггер конвертации
-        let triggerLabel = NSTextField(labelWithString: L10n.settingsTrigger)
-        triggerLabel.frame = NSRect(x: 20, y: y, width: 150, height: 22)
-        view.addSubview(triggerLabel)
-
-        let triggerPopup = NSPopUpButton(frame: NSRect(x: 175, y: y - 2, width: 255, height: 26))
-        populateTriggerPopup(triggerPopup)
-        triggerPopup.target = self
-        triggerPopup.action = #selector(triggerChanged)
-        view.addSubview(triggerPopup)
-        y -= 34
-
-        let rightOnlyCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerRightOnly, target: self, action: #selector(triggerRightOnlyChanged))
-        rightOnlyCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        rightOnlyCheckbox.state = SettingsManager.shared.triggerRightOnly ? .on : .off
-        view.addSubview(rightOnlyCheckbox)
-        y -= 26
-
-        let doubleTapCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerDoubleTap, target: self, action: #selector(triggerDoubleTapChanged))
-        doubleTapCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        doubleTapCheckbox.state = SettingsManager.shared.triggerDoubleTap ? .on : .off
-        view.addSubview(doubleTapCheckbox)
-        y -= 30
-
-        // issue #14: отдельный хоткей чистого переключения раскладки (без конверсии) —
-        // в т.ч. Ctrl+Shift и другие модификаторные комбо, недоступные системным настройкам.
-        let switchLabel = NSTextField(labelWithString: L10n.settingsSwitchHotkey)
-        switchLabel.frame = NSRect(x: 20, y: y, width: 150, height: 22)
-        view.addSubview(switchLabel)
-
-        let switchPopup = NSPopUpButton(frame: NSRect(x: 175, y: y - 2, width: 255, height: 26))
-        populateSwitchHotkeyPopup(switchPopup)
-        switchPopup.target = self
-        switchPopup.action = #selector(switchHotkeyChanged)
-        view.addSubview(switchPopup)
-        switchHotkeyPopup = switchPopup
-        y -= 34   // как зазор popup→rightOnly у триггера (попап высотой 26 на y-2)
-
-        // issue #14: только правая клавиша хоткея смены (зеркало rightOnly триггера).
-        let switchRightOnlyCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerRightOnly, target: self, action: #selector(switchRightOnlyChanged))
-        switchRightOnlyCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        switchRightOnlyCheckbox.state = SettingsManager.shared.switchRightOnly ? .on : .off
-        view.addSubview(switchRightOnlyCheckbox)
-        y -= 26
-
-        // issue #14: смена по двойному тапу выбранного хоткея (зеркало double-tap триггера).
-        let switchDoubleTapCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerDoubleTap, target: self, action: #selector(switchDoubleTapChanged))
-        switchDoubleTapCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        switchDoubleTapCheckbox.state = SettingsManager.shared.switchDoubleTap ? .on : .off
-        view.addSubview(switchDoubleTapCheckbox)
-        y -= 34
-
-        // issue #29: отдельный хоткей смены регистра (последнее слово / выделение), как Alt+Break
-        // в Punto. Должен отличаться от триггера и от хоткея смены раскладки (движок игнорирует совпадения).
-        let caseLabel = NSTextField(labelWithString: L10n.settingsCaseHotkey)
-        caseLabel.frame = NSRect(x: 20, y: y, width: 150, height: 22)
-        view.addSubview(caseLabel)
-
-        let casePopup = NSPopUpButton(frame: NSRect(x: 175, y: y - 2, width: 255, height: 26))
-        populateCaseHotkeyPopup(casePopup)
-        casePopup.target = self
-        casePopup.action = #selector(caseHotkeyChanged)
-        view.addSubview(casePopup)
-        caseHotkeyPopup = casePopup
-        y -= 34
-
-        let caseRightOnlyCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerRightOnly, target: self, action: #selector(caseRightOnlyChanged))
-        caseRightOnlyCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        caseRightOnlyCheckbox.state = SettingsManager.shared.caseRightOnly ? .on : .off
-        view.addSubview(caseRightOnlyCheckbox)
-        y -= 26
-
-        let caseDoubleTapCheckbox = NSButton(checkboxWithTitle: L10n.settingsTriggerDoubleTap, target: self, action: #selector(caseDoubleTapChanged))
-        caseDoubleTapCheckbox.frame = NSRect(x: 40, y: y, width: 390, height: 22)
-        caseDoubleTapCheckbox.state = SettingsManager.shared.caseDoubleTap ? .on : .off
-        view.addSubview(caseDoubleTapCheckbox)
-        y -= 32
-
-        let triggerHint = NSTextField(wrappingLabelWithString: L10n.settingsTriggerHint)
-        triggerHint.frame = NSRect(x: 40, y: y - 22, width: 400, height: 36)
-        triggerHint.font = .systemFont(ofSize: 11)
-        triggerHint.textColor = .secondaryLabelColor
-        view.addSubview(triggerHint)
-        y -= 48
-
         // Запуск при логине
         let loginCheckbox = NSButton(checkboxWithTitle: L10n.settingsLaunchAtLogin, target: self, action: #selector(launchAtLoginChanged))
         loginCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 22)
@@ -424,16 +341,168 @@ final class SettingsWindowController {
         layout2Popup = popup2
         y -= 50
 
-        // Описание хоткея
-        let hotkeyLabel = NSTextField(wrappingLabelWithString: L10n.settingsHotkey)
-        hotkeyLabel.frame = NSRect(x: 20, y: y - 40, width: 420, height: 55)
-        hotkeyLabel.font = .systemFont(ofSize: 12)
-        hotkeyLabel.textColor = .secondaryLabelColor
-        view.addSubview(hotkeyLabel)
-
         fitToText(view)
         item.view = topAligned(view)
         return item
+    }
+
+    // MARK: - Hotkeys Tab
+
+    private static let modifierItems: [(key: String, title: String)] = [
+        ("option", "Option ⌥ (Alt)"),
+        ("command", "Command ⌘"),
+        ("control", "Control ⌃"),
+        ("shift", "Shift ⇧"),
+    ]
+    // issue #12: комбо двух модификаторов (привычный по Windows стиль Alt+Shift).
+    private static let comboItems: [(key: String, title: String)] = [
+        ("option+shift", "⌥ + ⇧  (Option + Shift)"),   // discussion #32: виндовый дефолт
+        ("command+shift", "⌘ + ⇧  (Command + Shift)"),
+        ("control+shift", "⌃ + ⇧  (Control + Shift)"),
+        ("command+option", "⌘ + ⌥  (Command + Option)"),
+        ("control+option", "⌃ + ⌥  (Control + Option)"),
+    ]
+
+    /// Все хоткеи: триггер конверсии, смена раскладки (#14), регистр (#29), «всегда
+    /// раскладка 1/2» (discussion #32), «в исключения». У каждого: клавиша, сторона
+    /// (любая/левая/правая — для одиночного модификатора) и двойное нажатие.
+    private func createHotkeysTab() -> NSTabViewItem {
+        let item = NSTabViewItem()
+        item.label = L10n.settingsTabHotkeys
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 900))
+        var y: CGFloat = 860
+        let groups: [(slot: HotkeySlot, title: String, hint: String?)] = [
+            (.trigger, L10n.settingsTrigger, nil),
+            (.switchLayout, L10n.settingsSwitchHotkey, nil),
+            (.changeCase, L10n.settingsCaseHotkey, nil),
+            (.layout1, L10n.settingsHotkeyLayout1, nil),
+            (.layout2, L10n.settingsHotkeyLayout2, L10n.settingsHotkeyLayoutHint),
+            (.addException, L10n.settingsHotkeyException, L10n.settingsHotkeyExceptionHint),
+        ]
+        for (index, group) in groups.enumerated() {
+            let tag = HotkeySlot.allCases.firstIndex(of: group.slot) ?? 0
+            let label = NSTextField(labelWithString: group.title)
+            label.frame = NSRect(x: 20, y: y, width: 150, height: 22)
+            view.addSubview(label)
+            let popup = NSPopUpButton(frame: NSRect(x: 175, y: y - 2, width: 255, height: 26))
+            popup.tag = tag
+            popup.target = self
+            popup.action = #selector(hotkeyKeyChanged)
+            view.addSubview(popup)
+            hotkeyPopups[group.slot] = popup
+            y -= 34
+
+            let side = NSPopUpButton(frame: NSRect(x: 40, y: y - 2, width: 240, height: 26))
+            for title in [L10n.settingsHotkeySideAny, L10n.settingsHotkeySideLeft, L10n.settingsHotkeySideRight] {
+                side.addItem(withTitle: title)
+            }
+            side.tag = tag
+            side.target = self
+            side.action = #selector(hotkeySideChanged)
+            view.addSubview(side)
+            hotkeySidePopups[group.slot] = side
+            let double = NSButton(checkboxWithTitle: L10n.settingsTriggerDoubleTap, target: self, action: #selector(hotkeyDoubleChanged))
+            double.frame = NSRect(x: 290, y: y, width: 150, height: 22)
+            double.tag = tag
+            view.addSubview(double)
+            hotkeyDoubleChecks[group.slot] = double
+            y -= 30
+
+            if let hint = group.hint {
+                // Рамка строго под строкой выше и с зазором до следующей группы: fitToText
+                // объединяет в строку элементы, чьи рамки пересекаются по вертикали.
+                let h = NSTextField(wrappingLabelWithString: hint)
+                h.frame = NSRect(x: 40, y: y + 14 - 46, width: 400, height: 46)
+                h.font = .systemFont(ofSize: 11)
+                h.textColor = .secondaryLabelColor
+                view.addSubview(h)
+                y -= 56
+            }
+            if index < groups.count - 1 { y -= 8 }
+        }
+
+        let triggerHint = NSTextField(wrappingLabelWithString: L10n.settingsTriggerHint + " " + L10n.settingsHotkey)
+        triggerHint.frame = NSRect(x: 20, y: y - 44, width: 420, height: 44)
+        triggerHint.font = .systemFont(ofSize: 11)
+        triggerHint.textColor = .secondaryLabelColor
+        view.addSubview(triggerHint)
+
+        refreshHotkeyControls()
+        fitToText(view)
+        item.view = topAligned(view)
+        return item
+    }
+
+    /// Состояние всех контролов хоткеев по настройкам. Пункты, занятые хоткеем выше по
+    /// приоритету (с учётом стороны), гасятся с пометкой: движок их всё равно проигнорирует,
+    /// одно нажатие не должно делать два действия (issue #20: не оставлять пункт немым серым).
+    private func refreshHotkeyControls() {
+        let settings = SettingsManager.shared
+        for slot in HotkeySlot.allCases {
+            guard let popup = hotkeyPopups[slot] else { continue }
+            let current = settings.hotkey(slot)
+            popup.removeAllItems()
+            popup.autoenablesItems = false
+            if slot != .trigger {
+                popup.addItem(withTitle: L10n.settingsSwitchHotkeyOff)
+                popup.menu?.items.last?.representedObject = "" as NSString
+                popup.menu?.addItem(.separator())
+            }
+            let higher = HotkeySlot.allCases.prefix(while: { $0 != slot }).map { settings.hotkey($0) }
+            func add(_ it: (key: String, title: String)) {
+                popup.addItem(withTitle: it.title)
+                guard let menuItem = popup.menu?.items.last else { return }
+                menuItem.representedObject = it.key as NSString
+                let candidate = HotkeySetting(key: it.key, side: it.key.contains("+") ? .any : current.side, doubleTap: current.doubleTap)
+                if higher.contains(where: { candidate.overlaps($0) }) {
+                    menuItem.isEnabled = false
+                    menuItem.title += L10n.settingsSwitchHotkeyBusy
+                    menuItem.toolTip = L10n.settingsSwitchHotkeyBusy
+                }
+            }
+            Self.modifierItems.forEach(add)
+            popup.menu?.addItem(.separator())
+            Self.comboItems.forEach(add)
+            let key = slot == .trigger && current.key.isEmpty ? "option" : current.key
+            if let idx = popup.menu?.items.firstIndex(where: { ($0.representedObject as? String) == key }) {
+                popup.selectItem(at: idx)
+            } else {
+                popup.selectItem(at: 0)
+            }
+
+            let side = hotkeySidePopups[slot]
+            side?.selectItem(at: [HotkeySide.any, .left, .right].firstIndex(of: current.isCombo ? .any : current.side) ?? 0)
+            side?.isEnabled = !current.key.isEmpty && !current.isCombo
+            hotkeyDoubleChecks[slot]?.state = current.doubleTap ? .on : .off
+            hotkeyDoubleChecks[slot]?.isEnabled = !current.key.isEmpty
+        }
+    }
+
+    private func updateHotkey(tag: Int, _ change: (inout HotkeySetting) -> Void) {
+        guard HotkeySlot.allCases.indices.contains(tag) else { return }
+        let slot = HotkeySlot.allCases[tag]
+        var h = SettingsManager.shared.hotkey(slot)
+        change(&h)
+        if h.isCombo { h.side = .any }   // сторону комбо не различаем
+        SettingsManager.shared.setHotkey(slot, h)
+        refreshHotkeyControls()
+        onTriggerChanged?()               // reconfigure перечитает все хоткеи
+    }
+
+    @objc private func hotkeyKeyChanged(_ sender: NSPopUpButton) {
+        let key = (sender.selectedItem?.representedObject as? String) ?? ""
+        updateHotkey(tag: sender.tag) { $0.key = key }
+    }
+
+    @objc private func hotkeySideChanged(_ sender: NSPopUpButton) {
+        let side = [HotkeySide.any, .left, .right][max(0, min(2, sender.indexOfSelectedItem))]
+        updateHotkey(tag: sender.tag) { $0.side = side }
+    }
+
+    @objc private func hotkeyDoubleChanged(_ sender: NSButton) {
+        let on = sender.state == .on
+        updateHotkey(tag: sender.tag) { $0.doubleTap = on }
     }
 
     // MARK: - Exceptions Tab
@@ -832,36 +901,6 @@ final class SettingsWindowController {
 
     // MARK: - Trigger Popup
 
-    private func populateTriggerPopup(_ popup: NSPopUpButton) {
-        popup.removeAllItems()
-        // Имена клавиш не локализуем — это стандартные обозначения Apple.
-        let items: [(key: String, title: String)] = [
-            ("option", "Option ⌥ (Alt)"),
-            ("command", "Command ⌘"),
-            ("control", "Control ⌃"),
-            ("shift", "Shift ⇧"),
-            // Caps Lock убран: нативный перехват нестабилен (HID-дебаунс/тоггл) — см. техдолг.
-        ]
-        // issue #12: комбо двух модификаторов (привычный по Windows стиль Alt+Shift).
-        let comboItems: [(key: String, title: String)] = [
-            ("option+shift", "⌥ + ⇧  (Option + Shift)"),   // discussion #32: виндовый дефолт
-            ("command+shift", "⌘ + ⇧  (Command + Shift)"),
-            ("control+shift", "⌃ + ⇧  (Control + Shift)"),
-            ("command+option", "⌘ + ⌥  (Command + Option)"),
-            ("control+option", "⌃ + ⌥  (Control + Option)"),
-        ]
-        for it in items {
-            popup.addItem(withTitle: it.title)
-            popup.menu?.items.last?.representedObject = it.key as NSString
-        }
-        popup.menu?.addItem(.separator())
-        for it in comboItems {
-            popup.addItem(withTitle: it.title)
-            popup.menu?.items.last?.representedObject = it.key as NSString
-        }
-        selectItem(in: popup, matching: SettingsManager.shared.triggerKey)
-    }
-
     // MARK: - Actions
 
     @objc private func autoSwitchChanged(_ sender: NSButton) {
@@ -904,124 +943,6 @@ final class SettingsWindowController {
         onPerAppLayoutChanged?(enabled)
     }
 
-    @objc private func triggerChanged(_ sender: NSPopUpButton) {
-        SettingsManager.shared.triggerKey = (sender.selectedItem?.representedObject as? String) ?? "option"
-        onTriggerChanged?()
-        // issue #3: «занят триггером» в списке хоткея смены зависит от текущего триггера —
-        // пере-populate, иначе метка устареет и можно выбрать хоткей = триггеру (молча мёртвый).
-        if let p = switchHotkeyPopup { populateSwitchHotkeyPopup(p) }
-        if let p = caseHotkeyPopup { populateCaseHotkeyPopup(p) }   // issue #29: та же логика для хоткея регистра
-    }
-
-    /// issue #14: попап второго хоткея — «Выключен» + те же модификаторы/комбо (без Caps Lock).
-    private func populateSwitchHotkeyPopup(_ popup: NSPopUpButton) {
-        popup.removeAllItems()
-        popup.addItem(withTitle: L10n.settingsSwitchHotkeyOff)
-        popup.menu?.items.last?.representedObject = "" as NSString
-        popup.menu?.addItem(.separator())
-        let items: [(key: String, title: String)] = [
-            ("option", "Option ⌥ (Alt)"),
-            ("command", "Command ⌘"),
-            ("control", "Control ⌃"),
-            ("shift", "Shift ⇧"),
-        ]
-        let comboItems: [(key: String, title: String)] = [
-            ("option+shift", "⌥ + ⇧  (Option + Shift)"),   // discussion #32: виндовый дефолт
-            ("command+shift", "⌘ + ⇧  (Command + Shift)"),
-            ("control+shift", "⌃ + ⇧  (Control + Shift)"),
-            ("command+option", "⌘ + ⌥  (Command + Option)"),
-            ("control+option", "⌃ + ⌥  (Control + Option)"),
-        ]
-        for it in items {
-            popup.addItem(withTitle: it.title)
-            popup.menu?.items.last?.representedObject = it.key as NSString
-        }
-        popup.menu?.addItem(.separator())
-        for it in comboItems {
-            popup.addItem(withTitle: it.title)
-            popup.menu?.items.last?.representedObject = it.key as NSString
-        }
-        // Пункт, совпадающий с триггером конверсии, гасим: движок его всё равно
-        // игнорирует (один тап не должен делать два действия) — не даём выбрать
-        // «мёртвую» настройку без индикации (ревью-находка).
-        popup.autoenablesItems = false
-        let triggerKey = SettingsManager.shared.triggerKey
-        for item in popup.menu?.items ?? [] where (item.representedObject as? String) == triggerKey {
-            item.isEnabled = false
-            // issue #20: не оставлять пункт немым серым — объяснить, что он занят триггером.
-            item.title += L10n.settingsSwitchHotkeyBusy
-            item.toolTip = L10n.settingsSwitchHotkeyBusy
-        }
-        let current = SettingsManager.shared.switchHotkey
-        if let idx = popup.menu?.items.firstIndex(where: { ($0.representedObject as? String) == current }) {
-            popup.selectItem(at: idx)
-        } else {
-            popup.selectItem(at: 0)
-        }
-    }
-
-    @objc private func switchHotkeyChanged(_ sender: NSPopUpButton) {
-        SettingsManager.shared.switchHotkey = (sender.selectedItem?.representedObject as? String) ?? ""
-        onTriggerChanged?()   // reconfigure перечитает и switchConfig
-        if let p = caseHotkeyPopup { populateCaseHotkeyPopup(p) }   // issue #29: хоткей регистра не должен совпасть со сменой раскладки
-    }
-
-    /// issue #29: список хоткеев смены регистра. Гасим совпадения с триггером И с хоткеем смены
-    /// раскладки — движок их всё равно игнорирует (один тап = одно действие).
-    private func populateCaseHotkeyPopup(_ popup: NSPopUpButton) {
-        populateSwitchHotkeyPopup(popup)   // те же пункты
-        popup.autoenablesItems = false
-        let taken: Set<String> = [SettingsManager.shared.triggerKey, SettingsManager.shared.switchHotkey]
-        for item in popup.menu?.items ?? [] {
-            let key = (item.representedObject as? String) ?? ""
-            if !key.isEmpty && taken.contains(key) {
-                item.isEnabled = false
-                if !item.title.hasSuffix(L10n.settingsSwitchHotkeyBusy) { item.title += L10n.settingsSwitchHotkeyBusy }
-            }
-        }
-        let current = SettingsManager.shared.caseHotkey
-        if let idx = popup.menu?.items.firstIndex(where: { ($0.representedObject as? String) == current }) {
-            popup.selectItem(at: idx)
-        } else {
-            popup.selectItem(at: 0)
-        }
-    }
-
-    @objc private func caseHotkeyChanged(_ sender: NSPopUpButton) {
-        SettingsManager.shared.caseHotkey = (sender.selectedItem?.representedObject as? String) ?? ""
-        onTriggerChanged?()
-    }
-
-    @objc private func caseDoubleTapChanged(_ sender: NSButton) {
-        SettingsManager.shared.caseDoubleTap = sender.state == .on
-        onTriggerChanged?()
-    }
-
-    @objc private func caseRightOnlyChanged(_ sender: NSButton) {
-        SettingsManager.shared.caseRightOnly = sender.state == .on
-        onTriggerChanged?()
-    }
-
-    @objc private func switchDoubleTapChanged(_ sender: NSButton) {
-        SettingsManager.shared.switchDoubleTap = sender.state == .on
-        onTriggerChanged?()
-    }
-
-    @objc private func switchRightOnlyChanged(_ sender: NSButton) {
-        SettingsManager.shared.switchRightOnly = sender.state == .on
-        onTriggerChanged?()
-    }
-
-    @objc private func triggerRightOnlyChanged(_ sender: NSButton) {
-        SettingsManager.shared.triggerRightOnly = sender.state == .on
-        onTriggerChanged?()
-    }
-
-    @objc private func triggerDoubleTapChanged(_ sender: NSButton) {
-        SettingsManager.shared.triggerDoubleTap = sender.state == .on
-        onTriggerChanged?()
-    }
-
     @objc private func freqPacksChanged(_ sender: NSButton) {
         guard sender.state == .on else {
             FrequencyPacks.disable()
@@ -1036,7 +957,7 @@ final class SettingsWindowController {
             sender.isEnabled = true
             refreshFrequencyPacksState()
             switch outcome {
-            case .installed: break
+            case .installed, .cancelled: break
             case .noPacks: freqPacksStatus?.stringValue = L10n.settingsFreqPacksNone
             case .failed:
                 freqPacksStatus?.textColor = .systemRed
@@ -1045,12 +966,17 @@ final class SettingsWindowController {
         }
     }
 
+    /// Списки исключений изменились снаружи (хоткей «в исключения», learn-from-undo).
+    func reloadExceptionLists() {
+        exceptionEditors.forEach { $0.reload() }
+    }
+
     /// Галочка и строка «Установлено: RU 50 000 · EN 30 000» по фактическому состоянию.
     func refreshFrequencyPacksState() {
         let on = SettingsManager.shared.frequencyPacks
         freqPacksCheckbox?.state = on ? .on : .off
         freqPacksStatus?.textColor = .secondaryLabelColor
-        let installed = on ? FrequencyPacks.installed() : []
+        let installed = on ? FrequencyPacks.installed().filter { FrequencyPacks.pack(for: $0.lang) != nil } : []
         guard !installed.isEmpty else {
             freqPacksStatus?.stringValue = " "
             return

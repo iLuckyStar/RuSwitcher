@@ -198,6 +198,32 @@ final class TextConverter {
         return sel.isEmpty
     }
 
+    /// Выделенный текст для хоткея «в исключения». Сначала AX (буфер обмена не трогаем):
+    /// "" — выделения точно нет, nil — приложение AX-выделение не отдаёт. Во втором случае
+    /// пробуем Cmd+C, а буфер обмена возвращаем сразу же.
+    func selectedText() -> String? {
+        if let app = NSWorkspace.shared.frontmostApplication {
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(axApp, 0.25)
+            var focusedRaw: AnyObject?
+            if AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
+               let focused = focusedRaw {
+                var selRaw: AnyObject?
+                if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &selRaw) == .success,
+                   let sel = selRaw as? String {
+                    return sel
+                }
+            }
+        }
+        guard !isConverting else { return nil }
+        let pasteboard = NSPasteboard.general
+        cancelClipboardRestore()
+        if savedClipboardItems == nil { savedClipboardItems = snapshotPasteboard(pasteboard) }
+        isConverting = true
+        defer { restoreClipboardNow(); isConverting = false }
+        return tryCopy(pasteboard) ?? ""
+    }
+
     /// issue #24 (терминал): конвертирует всю набранную строку по БУФЕРУ нажатий — backspace на
     /// длину строки + перепечатка сконвертированного. Без OS-выделения (работает в терминалах и
     /// для иврита). Только для свежей непрерывной строки (буфер сбрасывается на пунктуации/Enter/

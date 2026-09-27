@@ -153,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             var list = SettingsManager.shared.deniedWords
             list.append(word)
             SettingsManager.shared.deniedWords = list
+            settingsController.reloadExceptionLists()
             rslog("learn: added word (len=\(word.count)) to never-convert")
         }
     }
@@ -460,6 +461,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.textConverter.clearState()
             self.updateStatusIcon()
         }
+        // «Всегда раскладка 1/2» (запрос kobygold, discussion #32): детерминированно, без
+        // переключателя — не надо смотреть на индикатор. Уже стоит нужная — ничего не делаем.
+        keyboardMonitor.onLayoutHotkey = { [weak self] n in
+            guard let self, SettingsManager.shared.autoSwitchEnabled else { return }
+            let settings = SettingsManager.shared
+            let sources = LayoutSwitcher.installedLayouts()
+            let id = n == 1
+                ? (settings.layout1ID.isEmpty ? LayoutSwitcher.autoDetectID1(from: sources) : settings.layout1ID)
+                : (settings.layout2ID.isEmpty ? LayoutSwitcher.autoDetectID2(from: sources) : settings.layout2ID)
+            guard !id.isEmpty, id != LayoutSwitcher.currentLayoutID() else { return }
+            LayoutSwitcher.switchTo(layoutID: id)
+            if !AutoSwitchPolicy.shouldDeferToRemoteClient {   // удалёнка: буфер живёт на той стороне
+                self.keyboardMonitor.markConverted()
+                self.textConverter.clearState()
+            }
+            self.updateStatusIcon()
+        }
+        // Хоткей «в исключения» (запрос из Telegram): выделил слово или только что его набрал →
+        // хоткей → слово в «Никогда не конвертировать», без похода в настройки.
+        keyboardMonitor.onExceptionHotkey = { [weak self] in
+            self?.addWordToExceptions()
+        }
         // issue #29: хоткей смены регистра последнего слова / выделения. Раскладку не трогает,
         // в защищённом поле — пас (приватность), как у триггера.
         keyboardMonitor.onCaseHotkey = { [weak self] in
@@ -510,8 +533,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Предлагаем автозагрузку и автозамену при первом запуске (по разу)
         offerLaunchAtLoginIfNeeded()
-        offerAutoConvertIfNeeded()
-        offerFrequencyPacksIfNeeded()
+        // Словарь предлагаем не в тот же запуск, что онбординг (иначе три окна подряд), и не
+        // сразу: при старте вместе с системой окно не должно выскакивать поверх входа.
+        if !offerAutoConvertIfNeeded() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+                self?.offerFrequencyPacksIfNeeded()
+            }
+        }
     }
 
     /// Авто-конвертация на границе слова: детект неправильной раскладки → конверт + смена.
@@ -633,9 +661,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Предлагает включить автозамену при первом запуске (один раз). Фича OFF по умолчанию,
     /// поэтому без явного предложения пользователь о ней не узнает.
-    private func offerAutoConvertIfNeeded() {
+    @discardableResult
+    private func offerAutoConvertIfNeeded() -> Bool {
         let settings = SettingsManager.shared
-        guard !settings.autoConvertOffered else { return }
+        guard !settings.autoConvertOffered else { return false }
         settings.autoConvertOffered = true
 
         let alert = NSAlert()
@@ -652,6 +681,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             rslog("User declined auto-convert at onboarding")
         }
+        return true
+    }
+
+    /// Слово для хоткея «в исключения»: выделение, а без выделения — набираемое или только что
+    /// набранное слово из буфера. Одно слово, без пробелов, с буквами — иначе короткий сигнал.
+    private func addWordToExceptions() {
+        guard !AutoSwitchPolicy.secureInputActive else { notifySecureInputPaused(); return }
+        guard !AutoSwitchPolicy.shouldDeferToRemoteClient else { return }
+        var word = (textConverter.selectedText() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if word.isEmpty {
+            let keys = keyboardMonitor.currentWordKeys.isEmpty ? keyboardMonitor.prevWordKeys : keyboardMonitor.currentWordKeys
+            word = DynamicKeyMapping.convertKeys(keys)?.original ?? ""
+        }
+        word = word.trimmingCharacters(in: .punctuationCharacters)
+        guard !word.isEmpty, word.count <= 40, !word.contains(where: { $0.isWhitespace }),
+              word.contains(where: { $0.isLetter }) else {
+            NSSound.beep()
+            return
+        }
+        let settings = SettingsManager.shared
+        if !settings.deniedWordsSet.contains(word.lowercased()) {
+            settings.deniedWords.append(word)
+            settingsController.reloadExceptionLists()
+        }
+        rslog("exception hotkey: added word (len \(word.count))")
+        secureNotice.show(title: String(format: L10n.noticeExceptionAddedTitle, word), body: L10n.noticeExceptionAddedBody)
     }
 
     /// Разово предлагает скачать расширенный словарь, когда автоконверсия включена, а в паре
@@ -678,6 +733,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let outcome = await FrequencyPacks.enable()
             rslog("packs: offer accepted, \(outcome)")
             settingsController.refreshFrequencyPacksState()
+            if case .failed = outcome {
+                // Согласие было, а скачать не вышло: сказать об этом и предложить снова в другой раз.
+                SettingsManager.shared.frequencyPacksOffered = false
+                secureNotice.show(title: L10n.settingsFreqPacks, body: L10n.settingsFreqPacksError)
+            }
         }
     }
 

@@ -71,6 +71,13 @@ final class ExceptionListEditor: NSObject, NSTableViewDataSource, NSTableViewDel
         return container
     }
 
+    /// Перечитать список (слово добавили хоткеем или из learn-from-undo, пока окно открыто).
+    func reload() {
+        items = getList()
+        table.reloadData()
+        updateRemoveButton()
+    }
+
     // MARK: - Table data
 
     func numberOfRows(in tableView: NSTableView) -> Int { items.count }
