@@ -33,7 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Тикает каждые 6ч; сам запрос к GitHub не чаще раза в сутки (троттл в UpdateChecker) и
         // уважает настройку «Автоматически проверять обновления» (её можно снять, чтобы отключить).
         updateCheckTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
-            Task { @MainActor in UpdateChecker.checkPeriodic() }
+            Task { @MainActor in
+                UpdateChecker.checkPeriodic()
+                await FrequencyPacks.refreshIfDue()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            Task { @MainActor in await FrequencyPacks.refreshIfDue() }
         }
         // Прогрев NSSpellChecker: первый чек поднимает XPC AppleSpell (сотни мс на main) —
         // прогреваем в тихую паузу после старта, а не на первом пробеле пользователя.
@@ -79,8 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController.onTriggerChanged = { [weak self] in
             self?.reconfigureTap()
         }
-        settingsController.onAutoConvertChanged = { [weak self] _ in
+        settingsController.onAutoConvertChanged = { [weak self] enabled in
             self?.rebuildMenu()  // синхронизировать галочку в меню
+            if enabled { self?.offerFrequencyPacksIfNeeded() }
         }
         settingsController.onRemoteDesktopChanged = { [weak self] _ in
             self?.reconfigureTap()  // уровень tap зависит от режима
@@ -504,6 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Предлагаем автозагрузку и автозамену при первом запуске (по разу)
         offerLaunchAtLoginIfNeeded()
         offerAutoConvertIfNeeded()
+        offerFrequencyPacksIfNeeded()
     }
 
     /// Авто-конвертация на границе слова: детект неправильной раскладки → конверт + смена.
@@ -643,6 +651,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rslog("User enabled auto-convert at onboarding")
         } else {
             rslog("User declined auto-convert at onboarding")
+        }
+    }
+
+    /// Разово предлагает скачать расширенный словарь, когда автоконверсия включена, а в паре
+    /// раскладок есть русская: словарь нужен только автоконверсии, и именно на русских машинах
+    /// жаловались, что простые слова не переключаются. «Позже» запоминается навсегда.
+    private func offerFrequencyPacksIfNeeded() {
+        let settings = SettingsManager.shared
+        guard settings.autoConvert, !settings.frequencyPacks, !settings.frequencyPacksOffered,
+              LayoutSwitcher.pairLanguages().contains("ru") else { return }
+        settings.frequencyPacksOffered = true
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.offerFreqPacksTitle
+        alert.informativeText = L10n.offerFreqPacksText
+        alert.addButton(withTitle: L10n.offerFreqPacksDownload)
+        alert.addButton(withTitle: L10n.offerFreqPacksLater)
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            rslog("packs: offer declined")
+            return
+        }
+        Task { @MainActor in
+            let outcome = await FrequencyPacks.enable()
+            rslog("packs: offer accepted, \(outcome)")
+            settingsController.refreshFrequencyPacksState()
         }
     }
 
@@ -943,6 +978,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         SettingsManager.shared.autoConvert.toggle()
         sender.state = SettingsManager.shared.autoConvert ? .on : .off
         settingsController.updateAutoConvertState(SettingsManager.shared.autoConvert)   // #4
+        if SettingsManager.shared.autoConvert { offerFrequencyPacksIfNeeded() }
     }
 
     @objc private func toggleKeySound(_ sender: NSMenuItem) {

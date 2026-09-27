@@ -11,7 +11,7 @@ enum Dict {
 
     @MainActor static func isAvailable(_ lang: String) -> Bool {
         let two = String(lang.prefix(2))
-        return languages().contains { String($0.prefix(2)) == two }
+        return FrequencyPacks.pack(for: two) != nil || languages().contains { String($0.prefix(2)) == two }
     }
 
     @MainActor private static func languages() -> [String] {
@@ -26,11 +26,23 @@ enum Dict {
     /// пользователя после запуска. Вызывается отложенно из applicationDidFinishLaunching.
     @MainActor static func warmUp() {
         _ = languages()
+        for lang in LayoutSwitcher.pairLanguages() { _ = FrequencyPacks.pack(for: lang) }   // ~10 мс на пак
         _ = isValidWord("тест", lang: "ru")
         _ = isValidWord("test", lang: "en")
     }
 
-    /// true — слово есть в словаре языка (орфография корректна).
+    /// Годится ли слово как результат конверсии: системный словарь или скачанный частотный
+    /// пак (сленг, имена, новые слова). Пак только для этой стороны: в субтитрах есть мусор
+    /// («nen», «зна», «истори»), и для набранного слова и разбора хвоста он дал бы ложные
+    /// «это слово» — там строгий isValidWord. Короче трёх букв в паке слов нет.
+    @MainActor static func isValidTarget(_ word: String, lang: String) -> Bool {
+        if word.count >= 3, let pack = FrequencyPacks.pack(for: lang), pack.contains(word.lowercased()) {
+            return true
+        }
+        return isValidWord(word, lang: lang)
+    }
+
+    /// true — слово есть в системном словаре языка (орфография корректна).
     @MainActor static func isValidWord(_ word: String, lang: String) -> Bool {
         let range = checker.checkSpelling(of: word, startingAt: 0, language: lang,
                                           wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
@@ -100,7 +112,7 @@ enum LayoutDetector {
                 // тот же класс, что «думаю vs дума.» в 2.7.0). Словарю отдаём только
                 // целиком буквенный образ; иначе .undecided — ручной триггер работает.
                 guard converted.allSatisfy({ $0.isLetter }) else { return .undecided }
-                return Dict.isValidWord(converted.lowercased(), lang: sideLang)
+                return Dict.isValidTarget(converted.lowercased(), lang: sideLang)
                     ? .switchToConverted : .undecided
             }
             return Dict.isValidWord(typed.lowercased(), lang: sideLang) ? .keep : .undecided
@@ -124,7 +136,7 @@ enum LayoutDetector {
 
         // Словарь — без учёта регистра (Caps Lock не должен мешать определению слова).
         guard Dict.isAvailable(oth) else { return .undecided }
-        guard Dict.isValidWord(converted.lowercased(), lang: oth) else { return .keep }
+        guard Dict.isValidTarget(converted.lowercased(), lang: oth) else { return .keep }
         // NSSpellChecker токенизирует по любому не-букве: «k.lb» для него «k» + «lb», «dc§» —
         // «dc», и оба «валидны», поэтому «люди» и «всё» оставались набранными. Словом текущего
         // языка набранное считаем, только если это буквы (апостроф внутри допустим) с

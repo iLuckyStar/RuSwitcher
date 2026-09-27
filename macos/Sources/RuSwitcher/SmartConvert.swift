@@ -90,7 +90,7 @@ enum SmartConvert {
             if wc.count == 2, let oth = ShortWords.common(flipLang), oth.contains(wc.lowercased()) {
                 return .flip(whole, flippedScript)
             }
-            return .unresolved   // «до», «уж» и т.п. — не в списке → по сигналу
+            return .unresolved   // не в списке → по сигналу соседей
         }
 
         // 3+ — словарь. Уже валидное слово своего языка → не трогаем (iPhone, стоит).
@@ -98,7 +98,7 @@ enum SmartConvert {
         // (1) флип целиком — ловит «ёлка» (`krf), «делю» (ltk.), «продолжение».
         let whole = DynamicKeyMapping.convertBidirectional(w)
         let wc = letterCore(whole)
-        if wc.count >= 2, wc.allSatisfy({ $0.isLetter }), Dict.isValidWord(wc.lowercased(), lang: flipLang) {
+        if wc.count >= 2, wc.allSatisfy({ $0.isLetter }), Dict.isValidTarget(wc.lowercased(), lang: flipLang) {
             return .flip(punctFixup(original: w, flipped: whole, towardLang: flipLang), flippedScript)
         }
         // (2) со снятым хвостом реальной пунктуации — «ghtlkj;tybt,» → «продолжение» + «,».
@@ -106,7 +106,7 @@ enum SmartConvert {
         if !suffix.isEmpty, !body.isEmpty {
             let bflip = DynamicKeyMapping.convertBidirectional(body)
             let bc = letterCore(bflip)
-            if bc.count >= 2, bc.allSatisfy({ $0.isLetter }), Dict.isValidWord(bc.lowercased(), lang: flipLang) {
+            if bc.count >= 2, bc.allSatisfy({ $0.isLetter }), Dict.isValidTarget(bc.lowercased(), lang: flipLang) {
                 return .flip(bflip + DynamicKeyMapping.punctThroughPair(suffix, towardLang: flipLang), flippedScript)
             }
         }

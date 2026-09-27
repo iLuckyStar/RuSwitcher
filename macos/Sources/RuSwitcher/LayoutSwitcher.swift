@@ -201,6 +201,17 @@ enum LayoutSwitcher {
         return (curLang, tgtLang)
     }
 
+    /// Языки пары раскладок, между которыми конвертируем (двухбуквенные коды).
+    static func pairLanguages() -> [String] {
+        let settings = SettingsManager.shared
+        let sources = installedLayouts()
+        let id1 = settings.layout1ID.isEmpty ? autoDetectID1(from: sources) : settings.layout1ID
+        let id2 = settings.layout2ID.isEmpty ? autoDetectID2(from: sources) : settings.layout2ID
+        return [id1, id2].compactMap { id in
+            sources.first(where: { sourceID($0) == id }).flatMap { languageCode($0) }.map { String($0.lowercased().prefix(2)) }
+        }
+    }
+
     // MARK: - Auto-detect
 
     /// Авто-определение «английской» (латинской) раскладки (используется и из DynamicKeyMapping).

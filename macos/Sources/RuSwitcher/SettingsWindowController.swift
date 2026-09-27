@@ -18,6 +18,8 @@ final class SettingsWindowController {
     private var switchHotkeyPopup: NSPopUpButton?   // issue #20/#3: пере-populate при смене триггера
     private var caseHotkeyPopup: NSPopUpButton?     // issue #29
     private var exceptionEditors: [ExceptionListEditor] = []
+    private var freqPacksCheckbox: NSButton?
+    private var freqPacksStatus: NSTextField?
 
     /// Callback для обновления меню
     var onAutoSwitchChanged: ((Bool) -> Void)?
@@ -456,6 +458,26 @@ final class SettingsWindowController {
         acHint.font = .systemFont(ofSize: 11); acHint.textColor = .secondaryLabelColor
         view.addSubview(acHint)
         y -= 38
+
+        // Скачиваемые частотные словари (3.5): нужны только автоконверсии, поэтому здесь.
+        let packs = NSButton(checkboxWithTitle: L10n.settingsFreqPacks, target: self, action: #selector(freqPacksChanged))
+        packs.frame = NSRect(x: 20, y: y - 22, width: 420, height: 22)
+        view.addSubview(packs)
+        freqPacksCheckbox = packs
+        y -= 24
+        let packsHint = NSTextField(wrappingLabelWithString: L10n.settingsFreqPacksHint)
+        packsHint.frame = NSRect(x: 40, y: y - 44, width: 400, height: 44)
+        packsHint.font = .systemFont(ofSize: 11); packsHint.textColor = .secondaryLabelColor
+        view.addSubview(packsHint)
+        y -= 46
+        // Статус всегда занимает строку (пустая — просто пробел), чтобы вёрстка не прыгала.
+        let packsStatus = NSTextField(labelWithString: " ")
+        packsStatus.frame = NSRect(x: 40, y: y - 16, width: 400, height: 16)
+        packsStatus.font = .systemFont(ofSize: 11)
+        view.addSubview(packsStatus)
+        freqPacksStatus = packsStatus
+        y -= 24
+        refreshFrequencyPacksState()
 
         // Флаг у курсора (issue #10)
         let caretFlag = NSButton(checkboxWithTitle: L10n.settingsCaretFlag, target: self, action: #selector(caretFlagChanged))
@@ -998,6 +1020,45 @@ final class SettingsWindowController {
     @objc private func triggerDoubleTapChanged(_ sender: NSButton) {
         SettingsManager.shared.triggerDoubleTap = sender.state == .on
         onTriggerChanged?()
+    }
+
+    @objc private func freqPacksChanged(_ sender: NSButton) {
+        guard sender.state == .on else {
+            FrequencyPacks.disable()
+            refreshFrequencyPacksState()
+            return
+        }
+        sender.isEnabled = false
+        freqPacksStatus?.textColor = .secondaryLabelColor
+        freqPacksStatus?.stringValue = L10n.settingsFreqPacksLoading
+        Task { @MainActor in
+            let outcome = await FrequencyPacks.enable()
+            sender.isEnabled = true
+            refreshFrequencyPacksState()
+            switch outcome {
+            case .installed: break
+            case .noPacks: freqPacksStatus?.stringValue = L10n.settingsFreqPacksNone
+            case .failed:
+                freqPacksStatus?.textColor = .systemRed
+                freqPacksStatus?.stringValue = L10n.settingsFreqPacksError
+            }
+        }
+    }
+
+    /// Галочка и строка «Установлено: RU 50 000 · EN 30 000» по фактическому состоянию.
+    func refreshFrequencyPacksState() {
+        let on = SettingsManager.shared.frequencyPacks
+        freqPacksCheckbox?.state = on ? .on : .off
+        freqPacksStatus?.textColor = .secondaryLabelColor
+        let installed = on ? FrequencyPacks.installed() : []
+        guard !installed.isEmpty else {
+            freqPacksStatus?.stringValue = " "
+            return
+        }
+        let fmt = NumberFormatter()
+        fmt.numberStyle = .decimal
+        let list = installed.map { "\($0.lang.uppercased()) \(fmt.string(from: NSNumber(value: $0.count)) ?? "\($0.count)")" }
+        freqPacksStatus?.stringValue = String(format: L10n.settingsFreqPacksInstalled, list.joined(separator: " · "))
     }
 
     @objc private func autoConvertChanged(_ sender: NSButton) {

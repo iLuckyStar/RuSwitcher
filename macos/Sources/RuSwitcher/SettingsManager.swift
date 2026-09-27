@@ -44,6 +44,9 @@ final class SettingsManager: @unchecked Sendable {
         static let caretFlag = "com.ruswitcher.caretFlag"
         static let secureInputNotice = "com.ruswitcher.secureInputNotice"
         static let hideMenuBarIcon = "com.ruswitcher.hideMenuBarIcon"
+        static let frequencyPacks = "com.ruswitcher.frequencyPacks"
+        static let frequencyPacksOffered = "com.ruswitcher.frequencyPacksOffered"
+        static let frequencyPacksChecked = "com.ruswitcher.frequencyPacksChecked"
         static let monochromeIcon = "com.ruswitcher.monochromeIcon"
         static let deniedAppsAdded = "com.ruswitcher.deniedAppsAdded"
         static let deniedAppsRemoved = "com.ruswitcher.deniedAppsRemoved"
@@ -245,6 +248,24 @@ final class SettingsManager: @unchecked Sendable {
     var hideMenuBarIcon: Bool {
         get { defaults.bool(forKey: Keys.hideMenuBarIcon) }
         set { defaults.set(newValue, forKey: Keys.hideMenuBarIcon) }
+    }
+
+    /// Скачиваемые частотные словари для автоконверсии (3.5). По умолчанию ВЫКЛ.
+    var frequencyPacks: Bool {
+        get { defaults.bool(forKey: Keys.frequencyPacks) }
+        set { defaults.set(newValue, forKey: Keys.frequencyPacks) }
+    }
+
+    /// Разовое предложение скачать словари уже показывали (ответ «Позже» тоже считается).
+    var frequencyPacksOffered: Bool {
+        get { defaults.bool(forKey: Keys.frequencyPacksOffered) }
+        set { defaults.set(newValue, forKey: Keys.frequencyPacksOffered) }
+    }
+
+    /// Когда последний раз сверяли паки с манифестом (обновления словарей).
+    var frequencyPacksChecked: Date? {
+        get { defaults.object(forKey: Keys.frequencyPacksChecked) as? Date }
+        set { defaults.set(newValue, forKey: Keys.frequencyPacksChecked) }
     }
 
     var caretFlag: Bool {
