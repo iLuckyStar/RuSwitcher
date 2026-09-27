@@ -125,10 +125,90 @@ enum LayoutDetector {
         // Словарь — без учёта регистра (Caps Lock не должен мешать определению слова).
         guard Dict.isAvailable(oth) else { return .undecided }
         guard Dict.isValidWord(converted.lowercased(), lang: oth) else { return .keep }
-        if Dict.isAvailable(cur), Dict.isValidWord(typed.lowercased(), lang: cur) {
+        // NSSpellChecker токенизирует по любому не-букве: «k.lb» для него «k» + «lb», «dc§» —
+        // «dc», и оба «валидны», поэтому «люди» и «всё» оставались набранными. Словом текущего
+        // языка набранное считаем, только если это буквы (апостроф внутри допустим) с
+        // возможной пунктуацией на конце: «he,» — англ. «he» с запятой, тут токенизация как
+        // раз защищает от «руб».
+        if Dict.isAvailable(cur), looksLikeWord(typed), Dict.isValidWord(typed.lowercased(), lang: cur) {
             return .keep
         }
         return .switchToConverted
+    }
+
+    static func looksLikeWord(_ s: String) -> Bool {
+        let trailing: Set<Character> = [",", ".", "!", "?", ";", ":", ")"]
+        var body = s[...]
+        while let last = body.last, trailing.contains(last) { body = body.dropLast() }
+        return !body.isEmpty && body.allSatisfy { $0.isLetter || $0 == "'" || $0 == "’" }
+    }
+
+    /// Знаки, которые не бывают ни частью слова, ни концом фразы сразу после слова.
+    /// В ЙЦУКЕН на этих клавишах ё, х, ъ (issue #35).
+    static let neverInWord: Set<Character> = ["`", "[", "]"]
+
+    enum TrailingResolution: Equatable {
+        case ambiguous
+        /// Сколько символов хвоста на самом деле буквы слова (0 = хвост целиком пунктуация).
+        case extend(Int)
+    }
+
+    /// Хвост слова: где кончается слово, а где начинается пунктуация (issue #15 → #35).
+    /// Клавиши . , ; ` [ ] в EN — это буквы ю б ж ё х ъ в ЙЦУКЕН, поэтому «levf.» — это
+    /// «дума.» или «думаю». Перебираем разрезы: слово = ядро + k букв хвоста, остаток
+    /// хвоста — литерал. Разрез правдоподобен, если слово за ним словарное (длиннее одной
+    /// буквы: однобуквенные «и», «в», «о» словарь принимает всегда) и следующий набранный
+    /// знак может закончить слово — ` [ ] не может. Один правдоподобный разрез → он и есть;
+    /// два и больше («дума.» / «думаю») → неоднозначность, точность важнее полноты;
+    /// ни одного → как раньше, ядро без хвоста (решает decide).
+    static func resolveTrailing(typed: [Character], converted: [Character], coreLength: Int,
+                                isValid: (String) -> Bool) -> TrailingResolution {
+        var letters = 0
+        while coreLength + letters < converted.count, converted[coreLength + letters].isLetter { letters += 1 }
+        guard letters > 0 else { return .extend(0) }
+        var plausible: [Int] = []
+        for k in 0...letters {
+            let end = coreLength + k
+            if k < letters, neverInWord.contains(typed[end]) { continue }
+            guard end >= 2, isValid(String(converted[..<end]).lowercased()) else { continue }
+            plausible.append(k)
+            if plausible.count > 1 { return .ambiguous }
+        }
+        return .extend(plausible.first ?? 0)
+    }
+
+    enum AutoPlan: Equatable {
+        case convert(coreLength: Int)
+        case skip(LayoutVerdict)
+        case ambiguous
+    }
+
+    /// Решение автоконверсии по слову целиком: отщепить хвост (#15), разобрать его (#35),
+    /// спросить decide. typed/converted — полное слово; canSplit — инвариант «1 клавиша =
+    /// 1 символ» (при слиянии графем хвост не трогаем). coreLength в .convert — сколько
+    /// символов конвертировать; остальное возвращается в поле литералом.
+    @MainActor
+    static func plan(typed: String, converted: String, canSplit: Bool,
+                     currentLang: String, otherLang: String, capsLock: Bool) -> AutoPlan {
+        let t = Array(typed), c = Array(converted)
+        var coreLength = t.count
+        let split = splitTrailingPunctuation(typed)
+        if canSplit, !split.suffix.isEmpty, split.coreLength > 0, c.count == t.count {
+            coreLength = split.coreLength
+            // Для пар с ивритом разбор не нужен: направление «в иврит» авто-путём не
+            // конвертится by design, а ивритский словарь принимает любые буквы.
+            if !isHebrew(otherLang), Dict.isAvailable(otherLang) {
+                let oth = String(otherLang.prefix(2))
+                switch resolveTrailing(typed: t, converted: c, coreLength: coreLength,
+                                       isValid: { Dict.isValidWord($0, lang: oth) }) {
+                case .ambiguous: return .ambiguous
+                case .extend(let k): coreLength += k
+                }
+            }
+        }
+        let verdict = decide(typed: String(t[..<coreLength]), converted: String(c[..<coreLength]),
+                             currentLang: currentLang, otherLang: otherLang, capsLock: capsLock)
+        return verdict == .switchToConverted ? .convert(coreLength: coreLength) : .skip(verdict)
     }
 
     /// issue #15: отщепляет прилипшую к концу слова пунктуацию ("ghbdtn," → ядро 6 + ",").

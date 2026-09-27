@@ -13,15 +13,16 @@ macos/Sources/RuSwitcher/ShortWords.swift.
 """
 import sys
 
-EN2RU = dict(zip("qwertyuiopasdfghjklzxcvbnm",
-                 "йцукенгшщзфывапролдячсмить"))
+EN2RU = dict(zip("qwertyuiopasdfghjklzxcvbnm[];',.`",
+                 "йцукенгшщзфывапролдячсмитьхъжэбюё"))
 RU2EN = {v: k for k, v in EN2RU.items()}
 
 def img_en_to_ru(w): return "".join(EN2RU.get(c, "?") for c in w)
 def img_ru_to_en(w): return "".join(RU2EN.get(c, "?") for c in w)
 
 # ---- lists under test (must match ShortWords.swift) ----
-SHORT_RU = set("не ты на он мы вы да но за бы же из ну по то от их ее её со ли ни об ей во им ко те та уж ок эй".split())
+SHORT_RU = set("не ты на он мы вы да но за бы же из ну по то от их ее её со ли ни об ей во им ко те та уж ок эй "
+               "до ой ах ох ух эх хм ха".split())
 SHORT_EN = set("to it of is in we me he my on do no be so go if up at as an us or by am ok hi oh ah um mr ya vs dj kb jr bp ye ds".split())
 
 # ---- reference of REAL 2-letter tokens (words + common abbreviations) ----
@@ -60,7 +61,7 @@ for w in sorted(SHORT_EN):
         print(f"  en «{w}» <-> ru «{c}»")
 
 print("\n=== sanity: key conversions still fire ===")
-for t, expect in [("yt", "не"), ("ns", "ты"), ("yf", "на"), ("lf", "да")]:
+for t, expect in [("yt", "не"), ("ns", "ты"), ("yf", "на"), ("lf", "да"), ("lj", "до"), ("jq", "ой"), ("f[", "ах")]:
     c = img_en_to_ru(t)
     fires = c in SHORT_RU and t not in SHORT_EN
     print(f"  type en '{t}' -> ru «{c}» converts? {fires} (want True; image==expect: {c==expect})")

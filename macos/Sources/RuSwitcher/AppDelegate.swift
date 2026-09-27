@@ -527,28 +527,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !allKeys.isEmpty else { rslog("auto: bail empty-keys"); return }  // курсор уехал — небезопасно
         guard let fullPair = DynamicKeyMapping.convertKeys(allKeys) else { rslog("auto: bail convertKeys-nil"); return }
 
-        // issue #15: слово с прилипшей пунктуацией ("ghbdtn,") — отщепляем хвост, детектим
-        // и конвертим ядро, хвост вернётся в поле литералом. Проверка счёта — инвариант
-        // «1 клавиша = 1 символ» обоих путей convertKeys; при слиянии графем не отщепляем.
-        var keys = allKeys
-        var suffix = ""
-        let split = LayoutDetector.splitTrailingPunctuation(fullPair.original)
-        if !split.suffix.isEmpty, split.coreLength > 0, fullPair.original.count == allKeys.count {
-            keys = Array(allKeys.prefix(split.coreLength))
-            suffix = split.suffix
-        }
-        guard let pair = suffix.isEmpty ? fullPair : DynamicKeyMapping.convertKeys(keys) else {
-            rslog("auto: bail convertKeys-nil"); return
-        }
-        if AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) { rslog("auto: bail denied-word"); return }
-
         // Язык для детектора. Для проброшенного через удалёнку текста (все символы — char)
         // направление определяем по СКРИПТУ набранного, а не по раскладке офисной машины:
         // на офисе раскладка может не соответствовать тому, что напечатали на контроллере,
         // и тогда decide ошибочно даёт keep (это и есть «авто в удалёнке не работает»).
+        let charOnly = allKeys.allSatisfy { $0.char != nil }
         let langs: (current: String, opposite: String)
-        if keys.allSatisfy({ $0.char != nil }) {
-            let typedIsCyrillic = pair.original.unicodeScalars.contains { $0.value >= 0x0400 && $0.value <= 0x04FF }
+        if charOnly {
+            let typedIsCyrillic = fullPair.original.unicodeScalars.contains { $0.value >= 0x0400 && $0.value <= 0x04FF }
             langs = typedIsCyrillic ? ("ru", "en") : ("en", "ru")
         } else if let l = LayoutSwitcher.currentAndOppositeLanguage() {
             langs = l
@@ -556,38 +542,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rslog("auto: bail langs-nil"); return
         }
 
-        // Ревью-находка (#15): '.', ',', ';', ':' в EN — клавиши букв ю/б/ж/Ж в ЙЦУКЕН,
-        // поэтому начало «хвоста» в целевой раскладке может оказаться буквами, а ядро +
-        // эти буквы — словарным словом: «levf.» → «думаю», «levf.!» → «думаю!». Идём по
-        // буквенному расширению ядра в полной конверсии и проверяем каждый префикс по
-        // словарю: первое словарное расширение = неоднозначность («думаю» vs «дума.») →
-        // точность важнее полноты, не делаем НИЧЕГО (ручной триггер конвертирует целиком).
-        // Первая не-буква — стоп: дальше хвост пунктуация и в целевой раскладке,
-        // двусмысленности нет. NSSpellChecker токенизирует («привет!» для него валиден),
-        // поэтому проверять полную конверсию целиком нельзя — только буквенные префиксы.
-        // Для пар с ивритом walk не нужен: направление «в иврит» авто-путём не конвертится
-        // by design (см. иврит-ветку decide), а ивритский словарь принимает любые буквы —
-        // walk дал бы бессмысленный bail на первом же шаге и мусорную строку в логе.
-        if !suffix.isEmpty, !LayoutDetector.isHebrew(langs.opposite), Dict.isAvailable(langs.opposite) {
-            let oth = String(langs.opposite.prefix(2))
-            let fullConv = Array(fullPair.converted)
-            var candidate = String(fullConv[..<split.coreLength])
-            for ch in fullConv[split.coreLength...] {
-                guard ch.isLetter else { break }
-                candidate.append(ch)
-                if Dict.isValidWord(candidate.lowercased(), lang: oth) {
-                    rslog("auto: bail ambiguous-suffix")
-                    return
-                }
-            }
+        // Хвост слова (#15, #35): «ghbdtn,» → ядро «привет» + запятая литералом;
+        // «pyf.» → «знаю» целиком; «levf.» (дума. / думаю) → неоднозначно, не трогаем.
+        let plan = LayoutDetector.plan(typed: fullPair.original, converted: fullPair.converted,
+                                       canSplit: fullPair.original.count == allKeys.count,
+                                       currentLang: langs.current, otherLang: langs.opposite,
+                                       capsLock: allKeys.contains { $0.caps })
+        guard case .convert(let coreLength) = plan else {
+            rslog("auto: len=\(fullPair.original.count) \(langs.current)/\(langs.opposite) plan=\(plan)")  // слова не логируем (приватность)
+            return
         }
-
-        let capsLock = keys.contains { $0.caps }
-        let verdict = LayoutDetector.decide(typed: pair.original, converted: pair.converted,
-                                            currentLang: langs.current, otherLang: langs.opposite,
-                                            capsLock: capsLock)
-        rslog("auto: len=\(pair.original.count) \(langs.current)/\(langs.opposite) verdict=\(verdict)")  // слова не логируем (приватность)
-        guard verdict == .switchToConverted else { return }
+        let suffix = String(fullPair.original.dropFirst(coreLength))
+        let keys = suffix.isEmpty ? allKeys : Array(allKeys.prefix(coreLength))
+        guard let pair = suffix.isEmpty ? fullPair : DynamicKeyMapping.convertKeys(keys) else {
+            rslog("auto: bail convertKeys-nil"); return
+        }
+        if AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) { rslog("auto: bail denied-word"); return }
+        rslog("auto: len=\(pair.original.count) \(langs.current)/\(langs.opposite) convert")
 
         if deferToRemote {
             // Удалёнка: текст конвертит офисный инстанс по реальным проброшенным символам.
