@@ -13,11 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var updateCheckTimer: Timer?   // периодическая авто-проверка обновлений, пока приложение работает
     private var monitoringActive = false
     private var caretIndicator: CaretIndicator?   // issue #10: флаг у каретки (бета, по умолчанию OFF)
+    private var startedAsLoginItem = false
     private let secureNotice = SecureInputNotice()  // issue #27: подсказка о защ. вводе без кражи фокуса
     private var lastFlagShown: String?            // идентичность раскладки для детекта смены (не title!)
     private var badgeCache: [String: NSImage] = [:]  // монохромные плашки, чтобы не перерисовывать 2с-опросом
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        startedAsLoginItem = Self.launchedAsLoginItem()   // Apple-событие запуска доступно только сейчас
         setupStatusItem()
         setupSettingsCallbacks()
         syncLoginItem()
@@ -472,6 +474,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 ? (settings.layout1ID.isEmpty ? LayoutSwitcher.autoDetectID1(from: sources) : settings.layout1ID)
                 : (settings.layout2ID.isEmpty ? LayoutSwitcher.autoDetectID2(from: sources) : settings.layout2ID)
             guard !id.isEmpty, id != LayoutSwitcher.currentLayoutID() else { return }
+            guard sources.contains(where: { LayoutSwitcher.sourceID($0) == id }) else {
+                rslog("layout hotkey: layout \(n) is not installed")   // удалили из системы — буфер не трогаем
+                NSSound.beep()
+                return
+            }
             LayoutSwitcher.switchTo(layoutID: id)
             if !AutoSwitchPolicy.shouldDeferToRemoteClient {   // удалёнка: буфер живёт на той стороне
                 self.keyboardMonitor.markConverted()
@@ -534,12 +541,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Предлагаем автозагрузку и автозамену при первом запуске (по разу)
         offerLaunchAtLoginIfNeeded()
-        // Словарь предлагаем не в тот же запуск, что онбординг (иначе три окна подряд), и не
-        // сразу: при старте вместе с системой окно не должно выскакивать поверх входа.
-        if !offerAutoConvertIfNeeded() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
-                self?.offerFrequencyPacksIfNeeded()
-            }
+        // Словарь предлагаем не в тот же запуск, что онбординг (иначе три окна подряд), и только
+        // при ручном запуске (в т.ч. перезапуск после обновления): при старте вместе с системой
+        // модальное окно выскочило бы поверх входа, а отложенное — посреди набора текста.
+        if !offerAutoConvertIfNeeded(), !startedAsLoginItem {
+            offerFrequencyPacksIfNeeded()
         }
     }
 
@@ -685,15 +691,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    /// Слово для хоткея «в исключения»: выделение, а без выделения — набираемое или только что
-    /// набранное слово из буфера. Одно слово, без пробелов, с буквами — иначе короткий сигнал.
+    /// Слово для хоткея «в исключения», по порядку: набираемое прямо сейчас (выделения тогда
+    /// нет: клик и стрелки сбрасывают буфер) → выделение (AX, а без AX — Cmd+C в текстовом
+    /// поле) → только что набранное → только что автоконвертированное (буфер после конверсии
+    /// пуст, а это как раз момент, когда хоткей нужнее всего). Гейты — как у соседних хоткеев.
     private func addWordToExceptions() {
+        guard SettingsManager.shared.autoSwitchEnabled else { return }
         guard !AutoSwitchPolicy.secureInputActive else { notifySecureInputPaused(); return }
         guard !AutoSwitchPolicy.shouldDeferToRemoteClient else { return }
-        var word = (textConverter.selectedText() ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if word.isEmpty {
-            let keys = keyboardMonitor.currentWordKeys.isEmpty ? keyboardMonitor.prevWordKeys : keyboardMonitor.currentWordKeys
-            word = DynamicKeyMapping.convertKeys(keys)?.original ?? ""
+        guard !SpotlightAX.isActive() else { NSSound.beep(); return }   // AX-выделение было бы у окна за Spotlight
+        var word = ""
+        if !keyboardMonitor.currentWordKeys.isEmpty {
+            word = DynamicKeyMapping.convertKeys(keyboardMonitor.currentWordKeys)?.original ?? ""
+        } else {
+            let ax = textConverter.selectedTextAX()
+            if let sel = ax, !sel.isEmpty {
+                word = sel
+            } else if ax == nil, let copied = textConverter.copySelectionInTextField() {
+                word = copied
+            }
+            word = word.trimmingCharacters(in: .whitespacesAndNewlines)
+            if word.isEmpty, !keyboardMonitor.prevWordKeys.isEmpty {
+                word = DynamicKeyMapping.convertKeys(keyboardMonitor.prevWordKeys)?.original ?? ""
+            }
+            if word.isEmpty, let last = lastAutoConverted, Date().timeIntervalSince(last.at) < 8 {
+                word = last.word
+            }
         }
         word = word.trimmingCharacters(in: .punctuationCharacters)
         guard !word.isEmpty, word.count <= 40, !word.contains(where: { $0.isWhitespace }),
@@ -735,8 +758,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rslog("packs: offer accepted, \(outcome)")
             settingsController.refreshFrequencyPacksState()
             if case .failed = outcome {
-                // Согласие было, а скачать не вышло: сказать об этом и предложить снова в другой раз.
-                SettingsManager.shared.frequencyPacksOffered = false
+                // Согласие было, а скачать не вышло: сказать один раз. Снова не предлагаем (где
+                // GitHub недоступен, окно висело бы на каждом запуске); включить можно в настройках.
                 secureNotice.show(title: L10n.settingsFreqPacks, body: L10n.settingsFreqPacksError)
             }
         }
@@ -1066,6 +1089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleMonoIcon(_ sender: NSMenuItem) {
         SettingsManager.shared.monochromeIcon.toggle()
+        settingsController.refreshFlagSizeState()
         sender.state = SettingsManager.shared.monochromeIcon ? .on : .off
         updateStatusIcon()   // перерисовать в новом стиле сразу
     }

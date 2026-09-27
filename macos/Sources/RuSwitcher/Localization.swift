@@ -923,7 +923,7 @@ enum L10n {
         // ========== PORTUGUÊS ==========
         "pt": [
             "settings.hideIcon": "Ocultar o ícone da barra de menus",
-            "settings.hideIcon.hint": "Para abrir os Ajustes ou recuperar o ícone, basta abrir o RuSwitcher novamente (Aplicativos ou Spotlight).",
+            "settings.hideIcon.hint": "Para abrir as Configurações ou recuperar o ícone, basta abrir o RuSwitcher novamente (Aplicativos ou Spotlight).",
             "settings.freqPacks": "Dicionário ampliado para a conversão automática",
             "settings.freqPacks.hint": "Adiciona palavras frequentes que faltam no dicionário do macOS: gírias, nomes, palavras novas. Baixado uma única vez do GitHub (cerca de 250 KB); as palavras continuam sendo verificadas só no seu Mac. Dados: FrequencyWords (OpenSubtitles), CC BY-SA 4.0.",
             "settings.freqPacks.installed": "Instalado: %@",
@@ -948,7 +948,7 @@ enum L10n {
             "settings.flagSize": "Tamanho da bandeira na barra de menus",
             "settings.flagSize.standard": "Padrão",
             "settings.hideIcon.alert.title": "Ocultar o ícone da barra de menus?",
-            "settings.hideIcon.alert.text": "O RuSwitcher continuará funcionando em segundo plano. Para abrir os Ajustes ou recuperar o ícone, basta abrir o RuSwitcher novamente - clique duplo em Aplicativos ou via Spotlight.",
+            "settings.hideIcon.alert.text": "O RuSwitcher continuará funcionando em segundo plano. Para abrir as Configurações ou recuperar o ícone, basta abrir o RuSwitcher novamente - clique duplo em Aplicativos ou via Spotlight.",
             "settings.quit": "Encerrar o RuSwitcher",
             "menu.autoSwitch": "Ativar RuSwitcher",
             "menu.checkPermissions": "Verificar permissões…",

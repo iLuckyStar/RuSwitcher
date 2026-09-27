@@ -12,6 +12,7 @@ final class SecureInputNotice {
     private let title: NSTextField
     private let body: NSTextField
     private var hideTimer: Timer?
+    private var generation = 0   // новый show() во время затухания не должен погаснуть
     private let width: CGFloat = 380
 
     init() {
@@ -67,6 +68,7 @@ final class SecureInputNotice {
 
     /// Показать плашку (не крадёт фокус). Длительность зависит от объёма текста.
     func show(title titleText: String, body bodyText: String) {
+        generation += 1
         title.stringValue = titleText
         body.stringValue = bodyText
 
@@ -94,8 +96,14 @@ final class SecureInputNotice {
 
     private func hide() {
         hideTimer?.invalidate(); hideTimer = nil
+        let shown = generation
         NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; panel.animator().alphaValue = 0 },
-                                             completionHandler: { [weak self] in self?.panel.orderOut(nil) })
+                                             completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.generation == shown else { return }
+                self.panel.orderOut(nil)
+            }
+        })
     }
 
     private func positionTopCenter(height h: CGFloat) {

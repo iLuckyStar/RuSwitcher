@@ -198,30 +198,41 @@ final class TextConverter {
         return sel.isEmpty
     }
 
-    /// Выделенный текст для хоткея «в исключения». Сначала AX (буфер обмена не трогаем):
-    /// "" — выделения точно нет, nil — приложение AX-выделение не отдаёт. Во втором случае
-    /// пробуем Cmd+C, а буфер обмена возвращаем сразу же.
-    func selectedText() -> String? {
-        if let app = NSWorkspace.shared.frontmostApplication {
-            let axApp = AXUIElementCreateApplication(app.processIdentifier)
-            AXUIElementSetMessagingTimeout(axApp, 0.25)
-            var focusedRaw: AnyObject?
-            if AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
-               let focused = focusedRaw {
-                var selRaw: AnyObject?
-                if AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &selRaw) == .success,
-                   let sel = selRaw as? String {
-                    return sel
-                }
-            }
-        }
-        guard !isConverting else { return nil }
+    /// Фокусный элемент фронтмост-приложения (nil — AX недоступен).
+    private func focusedElement() -> AXUIElement? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, 0.25)
+        var focusedRaw: AnyObject?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
+              let focused = focusedRaw else { return nil }
+        return (focused as! AXUIElement)
+    }
+
+    /// Выделенный текст через AX: "" — выделения точно нет, nil — приложение его не отдаёт.
+    func selectedTextAX() -> String? {
+        guard let element = focusedElement() else { return nil }
+        var selRaw: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selRaw) == .success else { return nil }
+        return selRaw as? String
+    }
+
+    /// Выделение через Cmd+C — только в текстовом поле: в списках Finder копируются имена
+    /// файлов, редакторы без выделения копируют строку целиком, а клиенты удалёнки шлют
+    /// Ctrl+C в гостя. Многострочное не берём. Буфер обмена возвращаем сразу.
+    func copySelectionInTextField() -> String? {
+        guard !isConverting, let element = focusedElement() else { return nil }
+        var roleRaw: AnyObject?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRaw)
+        let textRoles: Set<String> = [kAXTextFieldRole as String, kAXTextAreaRole as String, kAXComboBoxRole as String, "AXSearchField"]
+        guard let role = roleRaw as? String, textRoles.contains(role) else { return nil }
         let pasteboard = NSPasteboard.general
         cancelClipboardRestore()
         if savedClipboardItems == nil { savedClipboardItems = snapshotPasteboard(pasteboard) }
         isConverting = true
         defer { restoreClipboardNow(); isConverting = false }
-        return tryCopy(pasteboard) ?? ""
+        guard let text = tryCopy(pasteboard), !text.contains(where: { $0.isNewline }) else { return nil }
+        return text
     }
 
     /// issue #24 (терминал): конвертирует всю набранную строку по БУФЕРУ нажатий — backspace на

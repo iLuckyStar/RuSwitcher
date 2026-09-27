@@ -20,6 +20,7 @@ final class SettingsWindowController {
     private var hotkeyDoubleChecks: [HotkeySlot: NSButton] = [:]
     private var exceptionEditors: [ExceptionListEditor] = []
     private var freqPacksCheckbox: NSButton?
+    private var flagSizePopup: NSPopUpButton?
     private var freqPacksStatus: NSTextField?
 
     /// Callback для обновления меню
@@ -450,13 +451,13 @@ final class SettingsWindowController {
                 popup.menu?.items.last?.representedObject = "" as NSString
                 popup.menu?.addItem(.separator())
             }
-            let higher = HotkeySlot.allCases.prefix(while: { $0 != slot }).map { settings.hotkey($0) }
             func add(_ it: (key: String, title: String)) {
                 popup.addItem(withTitle: it.title)
                 guard let menuItem = popup.menu?.items.last else { return }
                 menuItem.representedObject = it.key as NSString
-                let candidate = HotkeySetting(key: it.key, side: it.key.contains("+") ? .any : current.side, doubleTap: current.doubleTap)
-                if higher.contains(where: { candidate.overlaps($0) }) {
+                // Занят, только если у клавиши не осталось свободной стороны: при левом ⌘ у
+                // раскладки 1 ⌘ для раскладки 2 доступен (сторона сама встанет на правую).
+                if Self.freeSide(for: slot, key: it.key, preferred: current.side) == nil {
                     menuItem.isEnabled = false
                     menuItem.title += L10n.settingsSwitchHotkeyBusy
                     menuItem.toolTip = L10n.settingsSwitchHotkeyBusy
@@ -480,12 +481,24 @@ final class SettingsWindowController {
         }
     }
 
-    private func updateHotkey(tag: Int, _ change: (inout HotkeySetting) -> Void) {
+    /// Сторона, на которой клавиша свободна от хоткеев выше по приоритету (сначала желаемая).
+    /// nil — занята целиком. У комбо стороны нет.
+    private static func freeSide(for slot: HotkeySlot, key: String, preferred: HotkeySide) -> HotkeySide? {
+        let settings = SettingsManager.shared
+        let higher = HotkeySlot.allCases.prefix(while: { $0 != slot }).map { settings.hotkey($0) }
+        let sides: [HotkeySide] = key.contains("+") ? [.any] : [preferred, .any, .left, .right]
+        return sides.first { side in !higher.contains { HotkeySetting(key: key, side: side, doubleTap: false).overlaps($0) } }
+    }
+
+    private func updateHotkey(tag: Int, keyChanged: Bool = false, _ change: (inout HotkeySetting) -> Void) {
         guard HotkeySlot.allCases.indices.contains(tag) else { return }
         let slot = HotkeySlot.allCases[tag]
         var h = SettingsManager.shared.hotkey(slot)
         change(&h)
         if h.isCombo { h.side = .any }   // сторону комбо не различаем
+        // Новую клавишу ставим на свободную сторону, если выбранная занята (левый ⌘ уже у
+        // раскладки 1 → ⌘ для раскладки 2 сам встаёт на правую).
+        if keyChanged, !h.key.isEmpty, let side = Self.freeSide(for: slot, key: h.key, preferred: h.side) { h.side = side }
         SettingsManager.shared.setHotkey(slot, h)
         refreshHotkeyControls()
         onTriggerChanged?()               // reconfigure перечитает все хоткеи
@@ -493,7 +506,7 @@ final class SettingsWindowController {
 
     @objc private func hotkeyKeyChanged(_ sender: NSPopUpButton) {
         let key = (sender.selectedItem?.representedObject as? String) ?? ""
-        updateHotkey(tag: sender.tag) { $0.key = key }
+        updateHotkey(tag: sender.tag, keyChanged: true) { $0.key = key }
     }
 
     @objc private func hotkeySideChanged(_ sender: NSPopUpButton) {
@@ -795,6 +808,7 @@ final class SettingsWindowController {
         flagPopup.target = self
         flagPopup.action = #selector(flagSizeChanged)
         view.addSubview(flagPopup)
+        flagSizePopup = flagPopup
         y -= 40
 
         // Debug log
@@ -858,6 +872,11 @@ final class SettingsWindowController {
         }
         SettingsManager.shared.hideMenuBarIcon = hide
         onHideIconChanged?(hide)
+    }
+
+    /// Монохромную плашку переключают и из меню, а окно настроек живёт всю сессию.
+    func refreshFlagSizeState() {
+        flagSizePopup?.isEnabled = !SettingsManager.shared.monochromeIcon
     }
 
     @objc private func flagSizeChanged(_ sender: NSPopUpButton) {
