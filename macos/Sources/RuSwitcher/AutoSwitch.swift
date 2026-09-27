@@ -36,6 +36,7 @@ enum Dict {
     /// («nen», «зна», «истори»), и для набранного слова и разбора хвоста он дал бы ложные
     /// «это слово» — там строгий isValidWord. Короче трёх букв в паке слов нет.
     @MainActor static func isValidTarget(_ word: String, lang: String) -> Bool {
+        if word.count >= 4, BrandWords.all.contains(word.lowercased()) { return true }   // #34
         if word.count >= 3, let pack = FrequencyPacks.pack(for: lang), pack.contains(word.lowercased()) {
             return true
         }
