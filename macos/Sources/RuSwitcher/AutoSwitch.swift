@@ -40,8 +40,23 @@ enum Dict {
         if word.count >= 3, let pack = FrequencyPacks.pack(for: lang), pack.contains(word.lowercased()) {
             return true
         }
-        return isValidWord(word, lang: lang)
+        return isValidWordOrName(word, lang: lang)
     }
+
+    /// 3.5.0b: слово словаря или имя собственное. Системный словарь знает «Яндекс», «Авито»,
+    /// «Петербург» только с заглавной, а сюда слово приходит в нижнем регистре. Только для
+    /// стороны цели (isValidTarget и разбор хвоста в plan): набранное проверяется строгим
+    /// isValidWord, ветка иврита этот путь не зовёт. Только целиком буквенные: NSSpellChecker
+    /// режет «Ub,,c» на «Ub» и «c», и с заглавной такие куски проходят как имена (стенд:
+    /// «гиббс», «клэр» ложно уходили в латиницу). Порог в 4 буквы подтверждён стендом
+    /// (docs/tools/autobench/run_head.sh).
+    @MainActor static func isValidWordOrName(_ word: String, lang: String) -> Bool {
+        if isValidWord(word, lang: lang) { return true }
+        return word.count >= 4 && word.allSatisfy({ $0.isLetter })
+            && isValidWord(capitalizedFirst(word), lang: lang)
+    }
+
+    static func capitalizedFirst(_ w: String) -> String { w.prefix(1).uppercased() + w.dropFirst() }
 
     /// true — слово есть в системном словаре языка (орфография корректна).
     @MainActor static func isValidWord(_ word: String, lang: String) -> Bool {
@@ -223,7 +238,21 @@ enum LayoutDetector {
                 switch resolveTrailing(typed: t, converted: c, coreLength: coreLength,
                                        isValid: { Dict.isValidWord($0, lang: oth) }) {
                 case .ambiguous: return .ambiguous
-                case .extend(let k): coreLength += k
+                case .extend(let k):
+                    // 3.5.0b: ядро не слово, разреза строгий словарь не нашёл, а буквы целиком — имя
+                    // («lilhl;» → «Джордж», «dbrnjhb.» → «Викторию»): конвертируем слово
+                    // целиком. Иначе ушло бы одно ядро («джорд;»). В сам разбор имена не
+                    // берём: «Котору», «Каку» с заглавной проходят, и «которую» стало бы
+                    // неоднозначным (стенд).
+                    var end = coreLength
+                    while end < c.count, c[end].isLetter { end += 1 }
+                    if k == 0, end > coreLength,
+                       !Dict.isValidWord(String(c[..<coreLength]).lowercased(), lang: oth),
+                       Dict.isValidWordOrName(String(c[..<end]).lowercased(), lang: oth) {
+                        coreLength = end
+                    } else {
+                        coreLength += k
+                    }
                 }
             }
         }
