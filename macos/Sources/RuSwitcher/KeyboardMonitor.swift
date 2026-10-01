@@ -5,17 +5,6 @@ import Foundation
 /// Маркер для симулированных событий — KeyboardMonitor их игнорирует
 let kRuSwitcherEventMarker: Int64 = 0x52555300
 
-/// Одно нажатие в буфере конверсии. Для обычного локального ввода известен keyCode
-/// (char == nil). Для ввода, проброшенного через удалённый стол, Apple Screen Sharing
-/// шлёт keyCode 0 + сам символ — тогда char != nil, и конверсия идёт по символу,
-/// а не по бесполезному keyCode 0 (именно keyCode 0 рождал «фффффф»).
-struct TypedKey {
-    let keyCode: UInt16
-    let shift: Bool
-    let caps: Bool
-    var char: Character? = nil
-}
-
 /// Выделенная очередь для файлового I/O лога — чтобы запись на диск не блокировала
 /// поток обработки событий (event tap висит на главном run loop, а лог пишется
 /// для каждого нажатия при включённом debug).
