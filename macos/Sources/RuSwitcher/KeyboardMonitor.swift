@@ -70,6 +70,13 @@ final class KeyboardMonitor: @unchecked Sendable {
     private var onAltReconvert: (() -> Void)?
     /// Авто-конвертация: вызывается (async) на границе слова, когда включён autoConvert.
     var onWordBoundary: (() -> Void)?
+    /// 3.5.0b: Enter/Tab на конце слова — синхронно из колбэка tap'а. true — клавиша
+    /// придержана: приложение перепечатает слово и отправит её само (TextConverter.replaceTail).
+    var onWordEndSync: ((WordEndKey, [TypedKey], UInt16, CGEventFlags) -> Bool)?
+    /// Перехватывать ли Enter/Tab (tap в режиме .defaultTap). Кэш на start/reconfigure.
+    fileprivate var interceptBoundaryKeys = false
+    /// keyCode придержанной клавиши: её физический keyUp тоже глотаем, повтор шлёт пару сам.
+    private var heldKeyUp: UInt16?
     /// issue #10: любой ввод/клик пользователя — чтобы спрятать флаг у каретки во время печати.
     var onUserInput: (() -> Void)?
     /// issue #10: включена ли фича флага-у-каретки. Гейтит диспатч onUserInput на горячем пути,
@@ -120,15 +127,22 @@ final class KeyboardMonitor: @unchecked Sendable {
             if let cfg = TriggerConfig.forSlot(slot) { detectors[slot] = TapDetector(config: cfg) }
         }
         rslog("Attempting to create event tap... (trigger=\(SettingsManager.shared.triggerKey) hotkeys=\(detectors.keys.map(\.rawValue).sorted()) capsLock=\(triggerConfig.isCapsLock))")
-        let mask: CGEventMask =
+        // 3.5.0b: Enter/Tab на конце слова придерживаем — нужен активный tap и keyUp в маске.
+        // В режиме удалённого стола не перехватываем: там клавиши приходят символами.
+        let settings = SettingsManager.shared
+        interceptBoundaryKeys = !settings.remoteDesktopMode && (settings.wordEndOnEnter || settings.wordEndOnTab)
+        heldKeyUp = nil
+        var mask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
             | (1 << CGEventType.leftMouseDown.rawValue)
             | (1 << CGEventType.rightMouseDown.rawValue)
+        if interceptBoundaryKeys { mask |= (1 << CGEventType.keyUp.rawValue) }
 
-        // Caps Lock требует активного tap (consume), чтобы подавить переключение
-        // регистра. Для модификаторов оставляем listenOnly — не вмешиваемся в ввод.
-        let options: CGEventTapOptions = triggerConfig.isCapsLock ? .defaultTap : .listenOnly
+        // Caps Lock и придержка Enter/Tab требуют активного tap (consume): подавить
+        // переключение регистра / придержать клавишу. Иначе listenOnly — не вмешиваемся в ввод.
+        let options: CGEventTapOptions = (triggerConfig.isCapsLock || interceptBoundaryKeys) ? .defaultTap : .listenOnly
+        rslog("Tap options: \(options == .defaultTap ? "default" : "listenOnly") intercept=\(interceptBoundaryKeys)")
 
         // Режим удалённого стола: session-уровень видит проброшенные Screen Sharing
         // нажатия (они инжектятся через CGEventPost, а HID-tap их не видит).
@@ -204,12 +218,53 @@ final class KeyboardMonitor: @unchecked Sendable {
         lineKeys = []
     }
 
-    /// Завершилось слово на пробеле — если включён autoConvert, дёргаем авто-путь
-    /// (async, чтобы не блокировать доставку текущего события).
+    /// Завершилось слово на пробеле — если включён хоть один шаг конвейера (автоконверсия,
+    /// автозамена, правка), дёргаем авто-путь (async, чтобы не блокировать доставку события).
     private func fireWordBoundary() {
-        guard SettingsManager.shared.autoConvert else { return }
+        let s = SettingsManager.shared
+        guard s.wordEndOnSpace, s.wordEndPipelineActive else { return }
         let cb = onWordBoundary
         DispatchQueue.main.async { cb?() }
+    }
+
+    /// 3.5.0b: Enter/Tab на конце слова. Зовётся из колбэка tap'а ДО handleKeyDown.
+    /// Enter — без модификаторов или с Shift (перенос строки в мессенджерах), цифровой Enter
+    /// тоже; Tab — только без модификаторов (Shift+Tab — назад по полям). Cmd/Ctrl/Opt —
+    /// как раньше (сброс буфера). true — клавиша придержана.
+    fileprivate func holdBoundaryKey(keyCode: UInt16, flags: CGEventFlags, autorepeat: Bool) -> Bool {
+        guard interceptBoundaryKeys, !autorepeat, currentWordLength > 0, !currentWordKeys.isEmpty else { return false }
+        let mods = flags.intersection([.maskCommand, .maskControl, .maskAlternate])
+        let settings = SettingsManager.shared
+        let key: WordEndKey
+        if keyCode == KC.enter || keyCode == KC.keypadEnter {
+            guard settings.wordEndOnEnter, mods.isEmpty else { return false }
+            key = .enter
+        } else if keyCode == KC.tab {
+            guard settings.wordEndOnTab, mods.isEmpty, !flags.contains(.maskShift) else { return false }
+            key = .tab
+        } else {
+            return false
+        }
+        prevWordBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        // Повтору нужны только Shift (перенос строки) и признак цифрового блока.
+        let repostFlags = flags.intersection([.maskShift, .maskNumericPad])
+        guard onWordEndSync?(key, currentWordKeys, keyCode, repostFlags) == true else { return false }
+        // То же, что handleKeyDown делает для любой клавиши: клавиша между модификаторами —
+        // не тап хоткея. Буфер сбрасываем, как Enter/Tab и раньше.
+        triggerArmed = false
+        disarmHotkeys()
+        lastTapTime = nil
+        keysTypedSinceConversion = true
+        heldKeyUp = keyCode
+        fullReset()
+        return true
+    }
+
+    /// keyUp придержанной клавиши глотаем: повтор шлёт свою пару down/up.
+    fileprivate func swallowHeldKeyUp(_ keyCode: UInt16) -> Bool {
+        guard let held = heldKeyUp, held == keyCode else { return false }
+        heldKeyUp = nil
+        return true
     }
 
     /// Сброс буфера при клике мышью — иначе backspace перепечатки сотрёт не то
@@ -530,6 +585,11 @@ private func keyboardCallback(
         if event.getIntegerValueField(.keyboardEventAutorepeat) != 0, remote {
             return Unmanaged.passUnretained(event)
         }
+        // 3.5.0b: Enter/Tab на конце слова — придержать, приложение отправит клавишу само.
+        if !remote, monitor.holdBoundaryKey(keyCode: keyCode, flags: event.flags,
+                                            autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0) {
+            return nil
+        }
         // Удалёнка: Screen Sharing пробрасывает символы как keyCode 0 + юникод-payload.
         // Читаем сам символ — без него буфер забивается keyCode 0 (= один символ → «фффффф»).
         var forwardedChar: Character? = nil
@@ -551,6 +611,10 @@ private func keyboardCallback(
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
         if monitor.handleFlagsChanged(flags: event.flags, keyCode: keyCode) {
             return nil  // съедаем Caps Lock, чтобы не переключался регистр
+        }
+    } else if type == .keyUp {
+        if monitor.swallowHeldKeyUp(UInt16(event.getIntegerValueField(.keyboardEventKeycode))) {
+            return nil
         }
     } else if type == .leftMouseDown || type == .rightMouseDown {
         monitor.resetBuffersOnClick()
