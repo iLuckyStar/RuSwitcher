@@ -18,6 +18,8 @@ final class TextConverter {
     private var lastOriginal = ""
     private var lastConverted = ""
     private var lastWasBuffer = false
+    /// 3.5.0b: откат последней замены меняет раскладку (конверсия) или нет (автозамена, правка).
+    private(set) var lastUndoSwitchesLayout = true
     /// Последняя clipboard-конверсия содержала RTL — реконверт стрелками небезопасен.
     private var lastClipboardRTL = false
 
@@ -98,7 +100,8 @@ final class TextConverter {
     /// сконвертирован («?»→«,» на Русской — ПК) — для честного отката реконвертом.
     /// Пустой typedSuffix означает «совпадает с passthroughSuffix».
     func convert(wordKeys: [TypedKey], prevWordKeys: [TypedKey], boundaryCount: Int,
-                 passthroughSuffix: String = "", typedSuffix: String = "") -> Bool {
+                 passthroughSuffix: String = "", typedSuffix: String = "",
+                 convertedOverride: String? = nil) -> Bool {
         let keys: [TypedKey]
         let trailingSpaces: Int
         if !wordKeys.isEmpty {
@@ -121,6 +124,9 @@ final class TextConverter {
             return convertViaClipboard(wordLength: wordKeys.count, prevWordLength: prevWordKeys.count, boundaryCount: boundaryCount)
         }
 
+        // 3.5.0b: ядро с исправленными двумя заглавными («RJulf» → «Когда», а не «КОгда»).
+        let converted = convertedOverride ?? pair.converted
+
         guard !isConverting else { return false }
         isConverting = true
 
@@ -129,10 +135,11 @@ final class TextConverter {
         // issue #33 (скептик, HIGH): в lastOriginal — суффикс КАК НАБРАН, иначе реконверт
         // после «tkrb?»→«елки,» восстанавливал бы «tkrb,» вместо «tkrb?».
         let originalSuffix = typedSuffix.isEmpty ? passthroughSuffix : typedSuffix
-        let insert = pair.converted + passthroughSuffix + spaces
+        let insert = converted + passthroughSuffix + spaces
         lastOriginal = pair.original + originalSuffix + spaces
-        lastConverted = pair.converted + passthroughSuffix + spaces
+        lastConverted = converted + passthroughSuffix + spaces
         lastWasBuffer = true
+        lastUndoSwitchesLayout = true
         rslog("buffer convert: \(keys.count) keys (+\(passthroughSuffix.count) punct, +\(trailingSpaces) sp)")
 
         // Инжект — вне main, чтобы usleep не голодал event tap.
@@ -141,6 +148,49 @@ final class TextConverter {
             self.backspace(bsCount)
             usleep(8_000)   // короткий зазор стирание→вставка: порядок и так гарантирован очередью HID
             self.insertText(insert)
+            Task { @MainActor in self.isConverting = false }
+        }
+        return true
+    }
+
+    /// 3.5.0b: заменить хвост поля — стереть deleteCount символов и вставить insert.
+    /// repostKey — придержанная клавиша (Enter/Tab), уходит ПОСЛЕ вставки в той же очереди,
+    /// поэтому порядок гарантирован. Уходит ВСЕГДА, даже если движок занят: проглоченный
+    /// Enter без повтора — потерянная отправка сообщения.
+    /// clearInlineCompletion — перед стиранием убрать выделенное автодополнение (адресная
+    /// строка): иначе первый Backspace съест его, и слово сотрётся со сдвигом (класс #16).
+    /// undoOriginal — что вернёт откат триггером; nil — отката нет, состояние чистится.
+    @discardableResult
+    func replaceTail(deleteCount: Int, insert: String,
+                     repostKey: (code: UInt16, flags: CGEventFlags)? = nil,
+                     clearInlineCompletion: Bool = false, undoOriginal: String? = nil) -> Bool {
+        guard !isConverting else {
+            if let k = repostKey { injectQueue.async { [weak self] in self?.simKey(keyCode: k.code, flags: k.flags) } }
+            rslog("replaceTail: busy — key passed through")
+            return false
+        }
+        isConverting = true
+        if let orig = undoOriginal {
+            lastOriginal = orig
+            lastConverted = insert
+            lastWasBuffer = true
+            lastUndoSwitchesLayout = false
+        } else {
+            clearState()
+        }
+        var extra = 0
+        if clearInlineCompletion, let sel = selectedTextAX(), !sel.isEmpty { extra = 1 }
+        let normalized = Self.normalizedForInsert(insert)
+        rslog("replaceTail: del=\(deleteCount)+\(extra) ins=\(insert.count) key=\(repostKey != nil)")
+        injectQueue.async { [weak self] in
+            guard let self else { return }
+            self.backspace(deleteCount + extra)
+            usleep(8_000)
+            self.insertText(normalized)
+            if let k = repostKey {
+                usleep(8_000)
+                self.simKey(keyCode: k.code, flags: k.flags)
+            }
             Task { @MainActor in self.isConverting = false }
         }
         return true
@@ -684,6 +734,7 @@ final class TextConverter {
         lastConverted = ""
         lastWasBuffer = false
         lastClipboardRTL = false
+        lastUndoSwitchesLayout = true
     }
 
     // MARK: - Private
@@ -699,18 +750,24 @@ final class TextConverter {
         }
     }
 
-    /// Впечатывает строку напрямую (юникод-вставка), без буфера обмена.
+    /// Впечатывает строку напрямую (юникод-вставка), без буфера обмена. Кусками по 20
+    /// UTF-16 (insertChunks): один CGEvent длиннее этого приложения обрезают, а расшифровка
+    /// автозамены бывает до 500 знаков.
     nonisolated private func insertText(_ text: String) {
-        guard !text.isEmpty, let source = makeSource() else { return }
-        let utf16 = Array(text.utf16)
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
-        utf16.withUnsafeBufferPointer { buf in
-            down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
-            up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+        guard let source = makeSource() else { return }
+        let chunks = insertChunks(text)
+        for (i, chunk) in chunks.enumerated() {
+            let utf16 = Array(chunk.utf16)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
+            utf16.withUnsafeBufferPointer { buf in
+                down.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            if i < chunks.count - 1 { usleep(1_000) }
         }
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
     }
 
     /// Вставляет текст через Cmd+V и ждёт завершения
