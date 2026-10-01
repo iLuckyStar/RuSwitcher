@@ -19,6 +19,7 @@ final class SettingsWindowController {
     private var hotkeySidePopups: [HotkeySlot: NSPopUpButton] = [:]
     private var hotkeyDoubleChecks: [HotkeySlot: NSButton] = [:]
     private var exceptionEditors: [ExceptionListEditor] = []
+    private var abbreviationEditor: AbbreviationEditor?
     private var freqPacksCheckbox: NSButton?
     private var flagSizePopup: NSPopUpButton?
     private var freqPacksStatus: NSTextField?
@@ -99,6 +100,28 @@ final class SettingsWindowController {
     /// а под-вью с абсолютными координатами (y от низа) иначе провисают к низу/центру короткой
     /// вкладки. Оборачиваем фиксированный контент в растягивающийся контейнер и пиним контент к
     /// верхнему краю (гибкий нижний отступ — .minYMargin).
+    /// 3.5.0b: вкладка выше maxHeight (у «Автоконверсии» с автозаменой ~1100 pt) — в прокрутку.
+    /// Иначе окно растёт по самой высокой вкладке, упирается в экран ноутбука, и низ вкладки
+    /// недостижим. Документ перевёрнутый — прокрутка открывается сверху.
+    private func scrollableTopAligned(_ content: NSView, maxHeight: CGFloat) -> NSView {
+        guard content.frame.height > maxHeight else { return topAligned(content) }
+        let doc = FlippedView(frame: NSRect(origin: .zero, size: content.frame.size))
+        content.frame.origin = .zero
+        doc.addSubview(content)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: content.frame.width, height: maxHeight))
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.documentView = doc
+        scroll.autoresizingMask = [.width, .height]
+        let outer = NSView(frame: scroll.frame)
+        outer.autoresizingMask = [.width, .height]
+        outer.autoresizesSubviews = true
+        outer.addSubview(scroll)
+        return outer
+    }
+
     private func topAligned(_ content: NSView) -> NSView {
         let outer = NSView(frame: content.frame)
         outer.autoresizingMask = [.width, .height]
@@ -525,8 +548,8 @@ final class SettingsWindowController {
         let item = NSTabViewItem()
         item.label = L10n.settingsTabExceptions
 
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 600))
-        var y: CGFloat = 586          // y — верх следующего элемента, идём сверху вниз
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 1000))
+        var y: CGFloat = 986          // y — верх следующего элемента, идём сверху вниз (fitToText подгонит высоту)
         exceptionEditors.removeAll()
 
         // Авто-конвертация
@@ -540,6 +563,46 @@ final class SettingsWindowController {
         acHint.frame = NSRect(x: 40, y: y - 32, width: 400, height: 32)
         acHint.font = .systemFont(ofSize: 11); acHint.textColor = .secondaryLabelColor
         view.addSubview(acHint)
+        y -= 38
+
+        // 3.5.0b: на каких клавишах срабатывает конвейер (автоконверсия, автозамена, правка)
+        let s = SettingsManager.shared
+        let keysLabel = NSTextField(labelWithString: L10n.settingsWordEndKeys)
+        keysLabel.frame = NSRect(x: 20, y: y - 18, width: 420, height: 18)
+        view.addSubview(keysLabel)
+        y -= 22
+        let keyBoxes: [(String, Bool)] = [(L10n.settingsWordEndSpace, s.wordEndOnSpace),
+                                          (L10n.settingsWordEndEnter, s.wordEndOnEnter),
+                                          (L10n.settingsWordEndTab, s.wordEndOnTab)]
+        for (i, (title, on)) in keyBoxes.enumerated() {
+            let cb = NSButton(checkboxWithTitle: title, target: self, action: #selector(wordEndKeyChanged))
+            cb.frame = NSRect(x: 40 + CGFloat(i) * 130, y: y - 22, width: 120, height: 22)
+            cb.state = on ? .on : .off
+            cb.tag = i
+            view.addSubview(cb)
+        }
+        y -= 24
+        let keysHint = NSTextField(wrappingLabelWithString: L10n.settingsWordEndHint)
+        keysHint.frame = NSRect(x: 40, y: y - 32, width: 400, height: 32)
+        keysHint.font = .systemFont(ofSize: 11); keysHint.textColor = .secondaryLabelColor
+        view.addSubview(keysHint)
+        y -= 38
+
+        // 3.5.0b: правка текста
+        let twoCaps = NSButton(checkboxWithTitle: L10n.settingsFixTwoCaps, target: self, action: #selector(fixTwoCapsChanged))
+        twoCaps.frame = NSRect(x: 20, y: y - 22, width: 420, height: 22)
+        twoCaps.state = s.fixTwoCaps ? .on : .off
+        view.addSubview(twoCaps)
+        y -= 24
+        let typos = NSButton(checkboxWithTitle: L10n.settingsFixTypos, target: self, action: #selector(fixTyposChanged))
+        typos.frame = NSRect(x: 20, y: y - 22, width: 420, height: 22)
+        typos.state = s.fixTypos ? .on : .off
+        view.addSubview(typos)
+        y -= 24
+        let typosHint = NSTextField(wrappingLabelWithString: L10n.settingsFixTyposHint)
+        typosHint.frame = NSRect(x: 40, y: y - 32, width: 400, height: 32)
+        typosHint.font = .systemFont(ofSize: 11); typosHint.textColor = .secondaryLabelColor
+        view.addSubview(typosHint)
         y -= 38
 
         // Скачиваемые частотные словари (3.5): нужны только автоконверсии, поэтому здесь.
@@ -623,8 +686,26 @@ final class SettingsWindowController {
             set: { SettingsManager.shared.alwaysConvertWords = $0 },
             addWordPrompt: L10n.settingsAddWordPrompt))
 
+        // 3.5.0b: автозамена сокращений
+        let abbrHeader = NSTextField(labelWithString: L10n.settingsAbbrHeader)
+        abbrHeader.frame = NSRect(x: 20, y: y - 18, width: 420, height: 18)
+        abbrHeader.font = .boldSystemFont(ofSize: 11)
+        abbrHeader.lineBreakMode = .byTruncatingTail
+        view.addSubview(abbrHeader)
+        let abbrH: CGFloat = 120
+        let abbrEditor = AbbreviationEditor(get: { SettingsManager.shared.abbreviations },
+                                            set: { SettingsManager.shared.abbreviations = $0 })
+        view.addSubview(abbrEditor.makeContainer(frame: NSRect(x: 20, y: y - 22 - abbrH, width: 420, height: abbrH)))
+        abbreviationEditor = abbrEditor
+        y -= (22 + abbrH + 6)
+        let abbrHint = NSTextField(wrappingLabelWithString: L10n.settingsAbbrHint)
+        abbrHint.frame = NSRect(x: 20, y: y - 32, width: 420, height: 32)
+        abbrHint.font = .systemFont(ofSize: 11); abbrHint.textColor = .secondaryLabelColor
+        view.addSubview(abbrHint)
+        y -= 38
+
         fitToText(view)
-        item.view = topAligned(view)
+        item.view = scrollableTopAligned(view, maxHeight: 760)
         return item
     }
 
@@ -1010,6 +1091,7 @@ final class SettingsWindowController {
     /// Списки исключений изменились снаружи (хоткей «в исключения», learn-from-undo).
     func reloadExceptionLists() {
         exceptionEditors.forEach { $0.reload() }
+        abbreviationEditor?.reload()
     }
 
     /// Галочка и строка «Установлено: RU 50 000 · EN 30 000» по фактическому состоянию.
@@ -1026,6 +1108,25 @@ final class SettingsWindowController {
         fmt.numberStyle = .decimal
         let list = installed.map { "\($0.lang.uppercased()) \(fmt.string(from: NSNumber(value: $0.count)) ?? "\($0.count)")" }
         freqPacksStatus?.stringValue = String(format: L10n.settingsFreqPacksInstalled, list.joined(separator: " · "))
+    }
+
+    /// 3.5.0b: Пробел/Enter/Tab. Enter и Tab меняют режим event tap — перезапускаем его.
+    @objc private func wordEndKeyChanged(_ sender: NSButton) {
+        let on = sender.state == .on
+        let s = SettingsManager.shared
+        switch sender.tag {
+        case 0: s.wordEndOnSpace = on
+        case 1: s.wordEndOnEnter = on; onTriggerChanged?()
+        default: s.wordEndOnTab = on; onTriggerChanged?()
+        }
+    }
+
+    @objc private func fixTwoCapsChanged(_ sender: NSButton) {
+        SettingsManager.shared.fixTwoCaps = sender.state == .on
+    }
+
+    @objc private func fixTyposChanged(_ sender: NSButton) {
+        SettingsManager.shared.fixTypos = sender.state == .on
     }
 
     @objc private func autoConvertChanged(_ sender: NSButton) {
@@ -1135,4 +1236,9 @@ final class SettingsWindowController {
         let logDir = NSHomeDirectory() + "/Library/Logs/RuSwitcher"
         return logDir + "/ruswitcher.log"
     }
+}
+
+/// Перевёрнутые координаты: документ прокрутки начинается сверху (3.5.0b).
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
