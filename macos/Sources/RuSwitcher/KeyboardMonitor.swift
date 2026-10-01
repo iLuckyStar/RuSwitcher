@@ -503,6 +503,9 @@ final class KeyboardMonitor: @unchecked Sendable {
 
 // MARK: - C Callback
 
+/// Событие принадлежит системе: возвращаем его как есть, passUnretained. passRetained
+/// добавлял лишнее удержание на КАЖДОЕ нажатие и щелчок, и события копились в памяти
+/// (за несколько дней работы — десятки мегабайт).
 private func keyboardCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
@@ -516,16 +519,16 @@ private func keyboardCallback(
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
         }
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     // Игнорируем собственные симулированные события по маркеру
     if event.getIntegerValueField(.eventSourceUserData) == kRuSwitcherEventMarker {
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     guard let userInfo else {
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     let monitor = Unmanaged<KeyboardMonitor>.fromOpaque(userInfo).takeUnretainedValue()
@@ -536,7 +539,7 @@ private func keyboardCallback(
         // Удалёнка: игнорируем авто-повтор клавиш — латентность Screen Sharing рождает
         // ложные повторы (тот самый «фффффф»), засоряющие буфер конверсии.
         if event.getIntegerValueField(.keyboardEventAutorepeat) != 0, remote {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
         // Удалёнка: Screen Sharing пробрасывает символы как keyCode 0 + юникод-payload.
         // Читаем сам символ — без него буфер забивается keyCode 0 (= один символ → «фффффф»).
@@ -564,5 +567,5 @@ private func keyboardCallback(
         monitor.resetBuffersOnClick()
     }
 
-    return Unmanaged.passRetained(event)
+    return Unmanaged.passUnretained(event)
 }

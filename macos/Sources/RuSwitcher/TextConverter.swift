@@ -766,11 +766,15 @@ final class TextConverter {
     /// Это нужно потому, что NSPasteboardItem становится невалидным после
     /// pasteboard.clearContents() — поэтому копируем data по каждому типу
     /// в новые NSPasteboardItem.
+    /// Картинку macOS кладёт в буфер и PNG, и несжатым TIFF (скриншот 5K — 59 МБ): копия
+    /// TIFF стоила +56 МБ памяти на одно нажатие. PNG без потерь, для возврата его хватает,
+    /// поэтому TIFF при наличии PNG не копируем.
     private func snapshotPasteboard(_ pb: NSPasteboard) -> [NSPasteboardItem] {
         guard let items = pb.pasteboardItems else { return [] }
         return items.map { oldItem in
             let newItem = NSPasteboardItem()
-            for type in oldItem.types {
+            let hasPNG = oldItem.types.contains(.png)
+            for type in oldItem.types where !(hasPNG && type == .tiff) {
                 if let data = oldItem.data(forType: type) {
                     newItem.setData(data, forType: type)
                 }
