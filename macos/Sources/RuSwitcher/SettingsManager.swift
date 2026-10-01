@@ -60,6 +60,13 @@ final class SettingsManager: @unchecked Sendable {
         static let deniedAppsRemoved = "com.ruswitcher.deniedAppsRemoved"
         static let deniedWords = "com.ruswitcher.deniedWords"
         static let alwaysConvertWords = "com.ruswitcher.alwaysConvertWords"
+        // 3.5.0b: конвейер конца слова
+        static let wordEndOnSpace = "com.ruswitcher.wordEnd.space"
+        static let wordEndOnEnter = "com.ruswitcher.wordEnd.enter"
+        static let wordEndOnTab = "com.ruswitcher.wordEnd.tab"
+        static let fixTwoCaps = "com.ruswitcher.fixTwoCaps"
+        static let fixTypos = "com.ruswitcher.fixTypos"
+        static let abbreviations = "com.ruswitcher.abbreviations"
     }
 
     private init() {}
@@ -422,6 +429,56 @@ final class SettingsManager: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Keys.alwaysConvertWords) }
     }
     var alwaysConvertWordsSet: Set<String> { Set(alwaysConvertWords.map { $0.lowercased() }) }
+
+    // MARK: - 3.5.0b: конвейер конца слова
+
+    /// На каких клавишах срабатывает конвейер (автоконверсия, автозамена, правка).
+    /// Пробел — по умолчанию ВКЛ (как было), Enter/Tab — ВЫКЛ: Enter в мессенджере
+    /// сразу отправляет сообщение вместе с исправленным словом.
+    var wordEndOnSpace: Bool {
+        get { defaults.object(forKey: Keys.wordEndOnSpace) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.wordEndOnSpace) }
+    }
+    var wordEndOnEnter: Bool {
+        get { defaults.bool(forKey: Keys.wordEndOnEnter) }
+        set { defaults.set(newValue, forKey: Keys.wordEndOnEnter) }
+    }
+    var wordEndOnTab: Bool {
+        get { defaults.bool(forKey: Keys.wordEndOnTab) }
+        set { defaults.set(newValue, forKey: Keys.wordEndOnTab) }
+    }
+
+    /// «КОгда» → «Когда». По умолчанию ВЫКЛ.
+    var fixTwoCaps: Bool {
+        get { defaults.bool(forKey: Keys.fixTwoCaps) }
+        set { defaults.set(newValue, forKey: Keys.fixTwoCaps) }
+    }
+
+    /// Опечатка одной соседней клавишей и «1ю8» → «1.8». По умолчанию ВЫКЛ.
+    var fixTypos: Bool {
+        get { defaults.bool(forKey: Keys.fixTypos) }
+        set { defaults.set(newValue, forKey: Keys.fixTypos) }
+    }
+
+    /// Автозамена «сокращение → текст». Хранится массивом словарей; при записи чистится.
+    var abbreviations: [Abbreviation] {
+        get {
+            let raw = defaults.array(forKey: Keys.abbreviations) as? [[String: String]] ?? []
+            return raw.compactMap { d in
+                guard let s = d["short"], let f = d["full"] else { return nil }
+                return Abbreviation(short: s, full: f)
+            }
+        }
+        set {
+            defaults.set(Abbreviations.sanitize(newValue).map { ["short": $0.short, "full": $0.full] },
+                         forKey: Keys.abbreviations)
+        }
+    }
+
+    /// Конвейер нужен, если включено хоть что-то из его шагов.
+    var wordEndPipelineActive: Bool {
+        autoConvert || fixTwoCaps || fixTypos || !abbreviations.isEmpty
+    }
 
     var donateURL: String { "https://boosty.to/ruswitcher" }
     var contactEmail: String { "xrashid@gmail.com" }

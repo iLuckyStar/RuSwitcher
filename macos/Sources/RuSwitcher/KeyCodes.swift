@@ -7,6 +7,7 @@ enum KC {
     static let letterC: UInt16 = 8   // Cmd+C — копировать
     static let letterV: UInt16 = 9   // Cmd+V — вставить
     static let enter: UInt16 = 36
+    static let keypadEnter: UInt16 = 76   // Enter на цифровом блоке
     static let tab: UInt16 = 48
     static let space: UInt16 = 49
     static let backspace: UInt16 = 51

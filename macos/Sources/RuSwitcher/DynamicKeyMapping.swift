@@ -5,6 +5,8 @@ import Foundation
 enum DynamicKeyMapping {
     /// Кэш маппинга: ключ = "layoutID1→layoutID2"
     nonisolated(unsafe) private static var mapCache: [String: [Character: Character]] = [:]
+    /// 3.5.0b: кэш таблиц «клавиша → символ» по ID раскладки.
+    nonisolated(unsafe) private static var tableCache: [String: [KeyStroke: Character]] = [:]
 
     /// Все keycodes для букв/знаков (0-50 покрывает основную клавиатуру)
     private static let allKeycodes: [UInt16] = Array(0...50)
@@ -88,6 +90,32 @@ enum DynamicKeyMapping {
         guard let source = layouts.first(where: { LayoutSwitcher.sourceID($0) == currentID }),
               let target = layouts.first(where: { LayoutSwitcher.sourceID($0) == targetID }) else { return nil }
         return (source, target)
+    }
+
+    /// 3.5.0b: таблицы «клавиша → символ» текущей и противоположной раскладок пары
+    /// (keyCode 0…50 без Enter/Tab/Space, без shift и с shift). Для автозамены
+    /// (клавиши сокращения) и правок (соседняя клавиша, разделитель в числе).
+    /// nil — пара не определилась.
+    static func pairKeyTables() -> (current: [KeyStroke: Character], other: [KeyStroke: Character])? {
+        guard let pair = resolveCurrentPair(),
+              let cur = keyTable(pair.source), let oth = keyTable(pair.target) else { return nil }
+        return (cur, oth)
+    }
+
+    private static func keyTable(_ source: TISInputSource) -> [KeyStroke: Character]? {
+        let id = LayoutSwitcher.sourceID(source)
+        if let cached = tableCache[id] { return cached }
+        guard let data = layoutDataForSource(source) else { return nil }
+        var t: [KeyStroke: Character] = [:]
+        for code in allKeycodes where code != KC.enter && code != KC.tab && code != KC.space {
+            for shift in [false, true] {
+                if let ch = translateKeycode(code, layoutData: data, shift: shift) {
+                    t[KeyStroke(code: code, shift: shift)] = ch
+                }
+            }
+        }
+        tableCache[id] = t
+        return t
     }
 
     /// Пара, ориентированная НА язык towardLang: target — раскладка этого языка из пары
@@ -252,6 +280,7 @@ enum DynamicKeyMapping {
 
     /// Очистить кэш (при смене раскладок в настройках)
     static func clearCache() {
+        tableCache.removeAll()
         mapCache.removeAll()
     }
 
