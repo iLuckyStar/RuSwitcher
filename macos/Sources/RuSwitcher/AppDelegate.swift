@@ -425,10 +425,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     }
                     return
                 }
+                // 3.5.0b: откат автозамены/правки раскладку не трогает (её и не меняли).
+                let switchesLayout = self.textConverter.lastUndoSwitchesLayout
                 if self.textConverter.reconvert() {
                     self.keyboardMonitor.markConverted()
-                    LayoutSwitcher.switchToOpposite()
-                    self.updateStatusIcon()
+                    if switchesLayout {
+                        LayoutSwitcher.switchToOpposite()
+                        self.updateStatusIcon()
+                    }
                     self.offerExceptionAfterUndo()
                 }
             }
@@ -443,6 +447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         monitoringActive = true
         keyboardMonitor.onWordBoundary = { [weak self] in
             self?.handleAutoConvert()
+        }
+        keyboardMonitor.onWordEndSync = { [weak self] key, keys, code, flags in
+            self?.handleWordEndSync(key: key, keys: keys, keyCode: code, flags: flags) ?? false
         }
         keyboardMonitor.onUserInput = { [weak self] in self?.caretIndicator?.userTyped() }  // issue #10
         // issue #14: хоткей чистого переключения раскладки (без конверсии). Буфер после
@@ -549,26 +556,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Авто-конвертация на границе слова: детект неправильной раскладки → конверт + смена.
-    /// Точность-first: при любой неуверенности ничего не делаем. Ручной триггер не трогаем.
-    private func handleAutoConvert() {
-        rslog("auto: fired")
-        guard SettingsManager.shared.autoSwitchEnabled else { rslog("auto: bail master-off"); return }
-        guard SettingsManager.shared.autoConvert else { rslog("auto: bail flag-off"); return }
-        guard !AutoSwitchPolicy.secureInputActive else { rslog("auto: bail secure-input"); return }
-        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // Удалёнка: НЕ выходим сразу — прогоняем детектор по своему (чистому) буферу, и при
-        // «не той раскладке» переключаем СВОЮ раскладку (конверсию делает инстанс на той стороне).
-        let deferToRemote = SettingsManager.shared.remoteDesktopMode && AutoSwitchPolicy.isRemoteDesktopClient(frontID)
-        if AutoSwitchPolicy.isDeniedApp(frontID) { rslog("auto: bail denied-app \(frontID ?? "?")"); return }
-        if let captured = keyboardMonitor.prevWordBundleID, captured != frontID {
-            rslog("auto: bail focus-changed"); return  // фокус уехал между пробелом и сейчас
-        }
+    /// Слово на конце для конвейера (3.5.0b).
+    private struct WordCtx {
+        let keys: [TypedKey]
+        let pair: (original: String, converted: String)
+        let langs: (current: String, opposite: String)
+    }
 
-        let allKeys = keyboardMonitor.prevWordKeys
-        let bc = keyboardMonitor.boundaryCount
-        guard !allKeys.isEmpty else { rslog("auto: bail empty-keys"); return }  // курсор уехал — небезопасно
-        guard let fullPair = DynamicKeyMapping.convertKeys(allKeys) else { rslog("auto: bail convertKeys-nil"); return }
+    /// Общие гейты и решение конвейера конца слова (3.5.0b): автозамена → конверсия раскладки
+    /// → правка текста. nil — конвейер тут не работает (гейт или нечего решать).
+    /// Точность-first: при любой неуверенности ничего не делаем. Ручной триггер не трогаем.
+    private func evaluateWordEnd(keys allKeys: [TypedKey]) -> (WordEndAction, WordCtx)? {
+        let settings = SettingsManager.shared
+        guard settings.autoSwitchEnabled else { rslog("auto: bail master-off"); return nil }
+        guard settings.wordEndPipelineActive else { rslog("auto: bail flag-off"); return nil }
+        guard !AutoSwitchPolicy.secureInputActive else { rslog("auto: bail secure-input"); return nil }
+        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if AutoSwitchPolicy.isDeniedApp(frontID) { rslog("auto: bail denied-app \(frontID ?? "?")"); return nil }
+        if let captured = keyboardMonitor.prevWordBundleID, captured != frontID {
+            rslog("auto: bail focus-changed"); return nil  // фокус уехал между границей и сейчас
+        }
+        guard !allKeys.isEmpty else { rslog("auto: bail empty-keys"); return nil }  // курсор уехал — небезопасно
+        guard let fullPair = DynamicKeyMapping.convertKeys(allKeys) else { rslog("auto: bail convertKeys-nil"); return nil }
 
         // Язык для детектора. Для проброшенного через удалёнку текста (все символы — char)
         // направление определяем по СКРИПТУ набранного, а не по раскладке офисной машины:
@@ -582,26 +591,119 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let l = LayoutSwitcher.currentAndOppositeLanguage() {
             langs = l
         } else {
-            rslog("auto: bail langs-nil"); return
+            rslog("auto: bail langs-nil"); return nil
         }
 
-        // Хвост слова (#15, #35): «ghbdtn,» → ядро «привет» + запятая литералом;
-        // «pyf.» → «знаю» целиком; «levf.» (дума. / думаю) → неоднозначно, не трогаем.
-        let plan = LayoutDetector.plan(typed: fullPair.original, converted: fullPair.converted,
-                                       canSplit: fullPair.original.count == allKeys.count,
-                                       currentLang: langs.current, otherLang: langs.opposite,
-                                       capsLock: allKeys.contains { $0.caps })
-        guard case .convert(let coreLength) = plan else {
-            rslog("auto: len=\(fullPair.original.count) \(langs.current)/\(langs.opposite) plan=\(plan)")  // слова не логируем (приватность)
-            return
+        let cur = String(langs.current.prefix(2)), oth = String(langs.opposite.prefix(2))
+        let capsLock = allKeys.contains { $0.caps }
+        // Таблицы клавиш пары — для автозамены и правок; у проброшенного удалёнкой текста
+        // клавиш нет, там работает только конверсия.
+        let tables = charOnly ? nil : DynamicKeyMapping.pairKeyTables()
+        var cfg = WordEndConfig()
+        cfg.autoConvert = settings.autoConvert
+        cfg.twoCaps = settings.fixTwoCaps && !capsLock
+        cfg.typos = settings.fixTypos
+        cfg.hebrewPair = LayoutDetector.isHebrew(langs.current) || LayoutDetector.isHebrew(langs.opposite)
+
+        let deps = WordEndDeps(
+            abbreviation: {
+                guard let t = tables else { return nil }
+                let list = settings.abbreviations
+                guard !list.isEmpty else { return nil }
+                let revs = [Abbreviations.reverseTable(t.current), Abbreviations.reverseTable(t.other)]
+                return Abbreviations.match(allKeys, list: list, reverses: revs)?.full
+            },
+            convertPlan: {
+                // Хвост слова (#15, #35): «ghbdtn,» → ядро «привет» + запятая литералом;
+                // «pyf.» → «знаю» целиком; «levf.» (дума. / думаю) → неоднозначно, не трогаем.
+                let plan = LayoutDetector.plan(typed: fullPair.original, converted: fullPair.converted,
+                                               canSplit: fullPair.original.count == allKeys.count,
+                                               currentLang: langs.current, otherLang: langs.opposite,
+                                               capsLock: capsLock)
+                guard case .convert(let core) = plan else {
+                    rslog("auto: len=\(fullPair.original.count) \(langs.current)/\(langs.opposite) plan=\(plan)")  // слова не логируем (приватность)
+                    return nil
+                }
+                return core
+            },
+            convertedCore: { String(fullPair.converted.prefix($0)) },
+            isTargetWord: { Dict.isValidTarget($0, lang: oth) },
+            isCurrentWord: { Dict.isValidTarget($0, lang: cur) },
+            numberFix: {
+                guard let t = tables else { return nil }
+                return TextFixes.fixNumber(keys: allKeys, typed: fullPair.original,
+                                           otherChar: { t.other[KeyStroke(code: $0, shift: false)] })
+            },
+            typoFix: {
+                guard let t = tables, Dict.isAvailable(cur), !capsLock else { return nil }
+                // Набрано не в той раскладке (автоконверсия выключена) — не «чиним» в чужое слово.
+                if Dict.isValidTarget(fullPair.converted.lowercased(), lang: oth) { return nil }
+                let pack = FrequencyPacks.pack(for: cur)
+                return TextFixes.fixTypo(
+                    keys: allKeys, typed: fullPair.original,
+                    charFor: { t.current[KeyStroke(code: $0, shift: $1)] },
+                    isTypedWord: { Dict.isValidTarget($0, lang: cur) },
+                    // Пак — первым: двоичный поиск дешевле NSSpellChecker.
+                    isCandidateWord: { (pack?.contains($0) ?? true) && Dict.isValidWord($0, lang: cur) })
+            },
+            isDeniedWord: {
+                let core = LayoutDetector.splitTrailingPunctuation(fullPair.original).coreLength
+                return AutoSwitchPolicy.isDeniedWord(fullPair.original, fullPair.converted)
+                    || AutoSwitchPolicy.isDeniedWord(String(fullPair.original.prefix(core)),
+                                                     String(fullPair.converted.prefix(core)))
+            })
+        let action = WordEndPipeline.decide(typed: fullPair.original, config: cfg, deps: deps)
+        rslog("auto: len=\(fullPair.original.count) action=\(Self.logName(action))")   // слова не логируем
+        return (action, WordCtx(keys: allKeys, pair: fullPair, langs: langs))
+    }
+
+    private static func logName(_ a: WordEndAction) -> String {
+        switch a {
+        case .none: return "none"
+        case .expand: return "expand"
+        case .convert(let n, let f): return "convert(\(n)\(f == nil ? "" : ",caps"))"
+        case .fix(_, let k): return "fix(\(k))"
         }
-        let suffix = String(fullPair.original.dropFirst(coreLength))
-        let keys = suffix.isEmpty ? allKeys : Array(allKeys.prefix(coreLength))
-        guard let pair = suffix.isEmpty ? fullPair : DynamicKeyMapping.convertKeys(keys) else {
+    }
+
+    /// Конвейер на пробеле: пробел уже в поле, стираем слово с пробелами и печатаем результат.
+    private func handleAutoConvert() {
+        rslog("auto: fired")
+        let bc = keyboardMonitor.boundaryCount
+        guard let (action, ctx) = evaluateWordEnd(keys: keyboardMonitor.prevWordKeys) else { return }
+        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        // Удалёнка: НЕ выходим сразу — прогоняем детектор по своему (чистому) буферу, и при
+        // «не той раскладке» переключаем СВОЮ раскладку (конверсию делает инстанс на той стороне).
+        let deferToRemote = SettingsManager.shared.remoteDesktopMode && AutoSwitchPolicy.isRemoteDesktopClient(frontID)
+        switch action {
+        case .none:
+            return
+        case .convert(let core, let fixedCore):
+            performAutoConvert(ctx, coreLength: core, fixedCore: fixedCore, boundaryCount: bc, deferToRemote: deferToRemote)
+        case .expand(let text), .fix(let text, _):
+            // Автозамена и правка — только локально и не в Spotlight (там стирание по счётчику
+            // оставляет лишнюю букву, #16).
+            guard !deferToRemote, !SpotlightAX.isActive() else { return }
+            let spaces = String(repeating: " ", count: bc)
+            if textConverter.replaceTail(deleteCount: ctx.keys.count + bc, insert: text + spaces,
+                                         undoOriginal: ctx.pair.original + spaces) {
+                keyboardMonitor.markConverted()
+                // Откат правки предлагает «в исключения», откат автозамены — нет (своё сокращение).
+                if case .fix = action { lastAutoConverted = (ctx.pair.original, Date()) } else { lastAutoConverted = nil }
+            }
+        }
+    }
+
+    /// Конверсия раскладки по решению конвейера (бывшее тело handleAutoConvert после plan).
+    private func performAutoConvert(_ ctx: WordCtx, coreLength: Int, fixedCore: String?,
+                                    boundaryCount bc: Int, deferToRemote: Bool) {
+        let suffix = String(ctx.pair.original.dropFirst(coreLength))
+        let keys = suffix.isEmpty ? ctx.keys : Array(ctx.keys.prefix(coreLength))
+        guard let pair = suffix.isEmpty ? ctx.pair : DynamicKeyMapping.convertKeys(keys) else {
             rslog("auto: bail convertKeys-nil"); return
         }
         if AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) { rslog("auto: bail denied-word"); return }
-        rslog("auto: len=\(pair.original.count) \(langs.current)/\(langs.opposite) convert")
+        rslog("auto: len=\(pair.original.count) \(ctx.langs.current)/\(ctx.langs.opposite) convert")
 
         if deferToRemote {
             // Удалёнка: текст конвертит офисный инстанс по реальным проброшенным символам.
@@ -618,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Backspace. Суффикс-случай (#15) в Spotlight редок и фиддловат — его не трогаем.
         if SpotlightAX.isActive() {
             if suffix.isEmpty,
-               textConverter.convertSpotlightWord(converted: pair.converted, boundaryCount: bc) {
+               textConverter.convertSpotlightWord(converted: fixedCore ?? pair.converted, boundaryCount: bc) {
                 keyboardMonitor.markConverted()
                 LayoutSwitcher.switchToOpposite()
                 updateStatusIcon()
@@ -636,12 +738,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let convertedSuffix = keys.allSatisfy({ $0.char != nil })
             ? suffix : DynamicKeyMapping.punctThroughCurrentPair(suffix)
         if textConverter.convert(wordKeys: [], prevWordKeys: keys, boundaryCount: bc,
-                                 passthroughSuffix: convertedSuffix, typedSuffix: suffix) {
+                                 passthroughSuffix: convertedSuffix, typedSuffix: suffix,
+                                 convertedOverride: fixedCore) {
             keyboardMonitor.markConverted()
             LayoutSwitcher.switchToOpposite()
             updateStatusIcon()
             lastAutoConverted = (pair.original, Date())
         }
+    }
+
+    /// Enter/Tab (3.5.0b): решение синхронно в колбэке tap'а (главный поток). true — клавиша
+    /// придержана: перепечатка и повтор клавиши уходят асинхронно через replaceTail, отката
+    /// нет (сообщение уже ушло / фокус уехал), предложения «в исключения» тоже.
+    private func handleWordEndSync(key: WordEndKey, keys: [TypedKey], keyCode: UInt16, flags: CGEventFlags) -> Bool {
+        if AutoSwitchPolicy.shouldDeferToRemoteClient { return false }
+        if SpotlightAX.isActive() { return false }
+        guard let (action, ctx) = evaluateWordEnd(keys: keys) else { return false }
+        let insert: String
+        var switchLayout = false
+        switch action {
+        case .none:
+            return false
+        case .expand(let text), .fix(let text, _):
+            insert = text
+        case .convert(let core, let fixedCore):
+            let suffix = String(ctx.pair.original.dropFirst(core))
+            let coreKeys = suffix.isEmpty ? ctx.keys : Array(ctx.keys.prefix(core))
+            guard let pair = suffix.isEmpty ? ctx.pair : DynamicKeyMapping.convertKeys(coreKeys),
+                  !AutoSwitchPolicy.isDeniedWord(pair.original, pair.converted) else { return false }
+            insert = (fixedCore ?? pair.converted) + DynamicKeyMapping.punctThroughCurrentPair(suffix)
+            switchLayout = true
+        }
+        rslog("wordEnd \(key): replace \(ctx.keys.count) → \(insert.count)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.textConverter.replaceTail(deleteCount: ctx.keys.count, insert: insert,
+                                           repostKey: (keyCode, flags), clearInlineCompletion: true)
+            self.lastAutoConverted = nil
+            if switchLayout {
+                LayoutSwitcher.switchToOpposite()
+                self.updateStatusIcon()
+            }
+        }
+        return true
     }
 
     /// Предлагает включить автозагрузку при первом запуске (один раз)
