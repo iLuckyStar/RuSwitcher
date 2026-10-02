@@ -20,6 +20,21 @@ final class TextConverter {
     private var lastWasBuffer = false
     /// 3.5.0b: откат последней замены меняет раскладку (конверсия) или нет (автозамена, правка).
     private(set) var lastUndoSwitchesLayout = true
+
+    /// 3.5.0b (ревью C1): приостановка event tap на время путей, которые шлют клавиши
+    /// (Cmd+C, Shift+Cmd+←, Cmd+A) с главного потока и ждут результата в usleep. Активный tap
+    /// (.defaultTap — придержка Enter/Tab или Caps Lock-триггер) держит каждое событие до
+    /// ответа колбэка, а колбэк живёт в главном run loop: свои же клавиши доходили бы только
+    /// после возврата, копирование «не удавалось», а опоздавший Cmd+C затирал буфер обмена.
+    /// Ставит AppDelegate (KeyboardMonitor.withTapSuspended); без него — просто выполняем.
+    var suspendTap: ((() -> Void) -> Void)?
+
+    private func gated<T>(_ body: () -> T) -> T {
+        guard let suspend = suspendTap else { return body() }
+        var result: T?
+        suspend { result = body() }
+        return result!
+    }
     /// Последняя clipboard-конверсия содержала RTL — реконверт стрелками небезопасен.
     private var lastClipboardRTL = false
 
@@ -163,7 +178,15 @@ final class TextConverter {
     @discardableResult
     func replaceTail(deleteCount: Int, insert: String,
                      repostKey: (code: UInt16, flags: CGEventFlags)? = nil,
-                     clearInlineCompletion: Bool = false, undoOriginal: String? = nil) -> Bool {
+                     clearInlineCompletion: Bool = false, undoOriginal: String? = nil,
+                     skipIfInlineCompletion: Bool = false) -> Bool {
+        // Ревью M7: фокус не в тексте (список Finder с быстрым поиском по имени, таблица) —
+        // Backspace и вставка ушли бы не туда. Только отдаём клавишу.
+        if let k = repostKey, let role = focusedRole(), Self.nonTextRoles.contains(role) {
+            injectQueue.async { [weak self] in self?.simKey(keyCode: k.code, flags: k.flags) }
+            rslog("replaceTail: focus role \(role) — key passed through")
+            return false
+        }
         guard !isConverting else {
             if let k = repostKey { injectQueue.async { [weak self] in self?.simKey(keyCode: k.code, flags: k.flags) } }
             rslog("replaceTail: busy — key passed through")
@@ -179,7 +202,17 @@ final class TextConverter {
             clearState()
         }
         var extra = 0
-        if clearInlineCompletion, let sel = selectedTextAX(), !sel.isEmpty { extra = 1 }
+        if clearInlineCompletion, let sel = selectedTextAX(), !sel.isEmpty {
+            // Ревью M6: под выделением — подсказка адресной строки, слово в поле — её начало
+            // («weath» → weather.com). Исправление опечатки тут превратило бы его в «wrath».
+            if skipIfInlineCompletion {
+                if let k = repostKey { injectQueue.async { [weak self] in self?.simKey(keyCode: k.code, flags: k.flags) } }
+                isConverting = false
+                rslog("replaceTail: inline completion — typo fix skipped, key passed through")
+                return false
+            }
+            extra = 1
+        }
         let normalized = Self.normalizedForInsert(insert)
         rslog("replaceTail: del=\(deleteCount)+\(extra) ins=\(insert.count) key=\(repostKey != nil)")
         injectQueue.async { [weak self] in
@@ -201,7 +234,8 @@ final class TextConverter {
     /// конверсия починит только слова не в той раскладке, верные — оставит). При no-op/сбое
     /// снимаем выделение (иначе строка осталась бы подсвеченной). Реконверт восстановит через
     /// сохранённый оригинал (см. convertViaClipboard/reconvertViaClipboard).
-    func convertLine() -> Bool {
+    func convertLine() -> Bool { gated { convertLineImpl() } }
+    private func convertLineImpl() -> Bool {
         guard !isConverting else { return false }
         // Скептик 3.2.0: не шлём Shift+Cmd+← вне текстового поля — иначе аккорд сработает как
         // ярлык приложения (напр. выделит не то). В поле — работаем.
@@ -256,8 +290,25 @@ final class TextConverter {
         var focusedRaw: AnyObject?
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRaw) == .success,
               let focused = focusedRaw else { return nil }
-        return (focused as! AXUIElement)
+        let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.25)   // ревью M5: запросы идут к элементу, не к приложению
+        return element
     }
+
+    /// 3.5.0b (ревью M7): роль сфокусированного элемента — только если AX её отдал.
+    private func focusedRole() -> String? {
+        guard let element = focusedElement() else { return nil }
+        var roleRaw: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRaw) == .success else { return nil }
+        return roleRaw as? String
+    }
+
+    /// Роли, где Enter/Tab точно не текст: список файлов, таблица, кнопка. Неизвестная роль
+    /// или сбой AX — считаем текстом (Electron, Qt часто отдают пусто).
+    private static let nonTextRoles: Set<String> = [
+        "AXList", "AXOutline", "AXTable", "AXBrowser", "AXGrid", "AXButton",
+        "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenu", "AXMenuItem", "AXScrollArea",
+    ]
 
     /// Выделенный текст через AX: "" — выделения точно нет, nil — приложение его не отдаёт.
     func selectedTextAX() -> String? {
@@ -270,7 +321,8 @@ final class TextConverter {
     /// Выделение через Cmd+C — только в текстовом поле: в списках Finder копируются имена
     /// файлов, редакторы без выделения копируют строку целиком, а клиенты удалёнки шлют
     /// Ctrl+C в гостя. Многострочное не берём. Буфер обмена возвращаем сразу.
-    func copySelectionInTextField() -> String? {
+    func copySelectionInTextField() -> String? { gated { copySelectionInTextFieldImpl() } }
+    private func copySelectionInTextFieldImpl() -> String? {
         guard !isConverting, let element = focusedElement() else { return nil }
         var roleRaw: AnyObject?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRaw)
@@ -299,6 +351,7 @@ final class TextConverter {
         guard converted != original else { return false }   // строка уже верная — no-op
         isConverting = true
         lastWasBuffer = true
+        lastUndoSwitchesLayout = true   // ревью I3: откат конверсии меняет раскладку
         lastOriginal = original
         lastConverted = converted
         let bsCount = original.count
@@ -375,7 +428,8 @@ final class TextConverter {
         return cycleCaseByBuffer(pair.original)
     }
 
-    private func changeCaseSelection() -> Bool {
+    private func changeCaseSelection() -> Bool { gated { changeCaseSelectionImpl() } }
+    private func changeCaseSelectionImpl() -> Bool {
         caseWord = nil   // выделение сбрасывает буферный цикл
         let pasteboard = NSPasteboard.general
         cancelClipboardRestore()
@@ -410,7 +464,8 @@ final class TextConverter {
     /// issue #29: смена регистра ВСЕЙ строки (когда включён «Convert whole line»). Обычные
     /// приложения — тем же AX-гейтом выделения строки, что и convertLine (#26). Повторные тапы
     /// циклят регистр: changeCaseSelection перечитывает текущую строку → nextCaseFromCurrent.
-    func changeCaseLine() -> Bool {
+    func changeCaseLine() -> Bool { gated { changeCaseLineImpl() } }
+    private func changeCaseLineImpl() -> Bool {
         guard !isConverting else { return false }
         guard isFocusedElementEditable() else { rslog("changeCaseLine: non-editable — bail"); return false }
         simKey(keyCode: KC.left, flags: [.maskShift, .maskCommand]); usleep(60_000)
@@ -447,10 +502,12 @@ final class TextConverter {
     /// Spotlight это ожидаемо). Реверсивно: повторный вызов конвертит назад. Буфер обмена
     /// сохраняется/восстанавливается. false → вызывающий падает на обычный путь.
     @MainActor
-    func convertSpotlight() -> Bool {
+    func convertSpotlight() -> Bool { gated { convertSpotlightImpl() } }
+    private func convertSpotlightImpl() -> Bool {
         guard !isConverting else { return false }
         isConverting = true
         lastWasBuffer = false
+        lastUndoSwitchesLayout = true   // ревью I3: откат конверсии меняет раскладку
         let pasteboard = NSPasteboard.general
         cancelClipboardRestore()
         // issue #16 (skeptic): НЕ пере-снимаем буфер, если восстановление уже отложено —
@@ -508,6 +565,7 @@ final class TextConverter {
         guard !isConverting, !converted.isEmpty else { return false }
         isConverting = true
         lastWasBuffer = false   // реконверт авто-слова в Spotlight не поддерживаем
+        lastUndoSwitchesLayout = true   // ревью I3: откат конверсии меняет раскладку
         rslog("spotlight auto: word-select replace (bc=\(boundaryCount))")
         injectQueue.async { [weak self] in
             guard let self else { return }
@@ -548,12 +606,16 @@ final class TextConverter {
     /// Конвертация через буфер обмена (фолбэк: выделенный мышью текст и т.п.).
     /// Сначала проверяет выделение, потом пробует слово по счётчику.
     func convertViaClipboard(wordLength: Int, prevWordLength: Int, boundaryCount: Int) -> Bool {
+        gated { convertViaClipboardImpl(wordLength: wordLength, prevWordLength: prevWordLength, boundaryCount: boundaryCount) }
+    }
+    private func convertViaClipboardImpl(wordLength: Int, prevWordLength: Int, boundaryCount: Int) -> Bool {
         guard !isConverting else {
             rslog("convert: skipped — already converting")
             return false
         }
         isConverting = true
         lastWasBuffer = false
+        lastUndoSwitchesLayout = true   // ревью I3: откат конверсии меняет раскладку
         defer { isConverting = false }
 
         if !isFocusedElementEditable() {
@@ -670,7 +732,8 @@ final class TextConverter {
     }
 
     /// Повторная конвертация через буфер обмена (фолбэк).
-    private func reconvertViaClipboard() -> Bool {
+    private func reconvertViaClipboard() -> Bool { gated { reconvertViaClipboardImpl() } }
+    private func reconvertViaClipboardImpl() -> Bool {
         guard !isConverting else {
             rslog("reconvert: skipped — already converting")
             return false

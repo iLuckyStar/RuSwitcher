@@ -451,6 +451,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keyboardMonitor.onWordEndSync = { [weak self] key, keys, code, flags in
             self?.handleWordEndSync(key: key, keys: keys, keyCode: code, flags: flags) ?? false
         }
+        // Ревью C1: пути с Cmd+C / Shift+Cmd+← на главном потоке — при выключенном tap'е.
+        textConverter.suspendTap = { [weak self] body in
+            guard let self else { body(); return }
+            self.keyboardMonitor.withTapSuspended(body)
+        }
         keyboardMonitor.onUserInput = { [weak self] in self?.caretIndicator?.userTyped() }  // issue #10
         // issue #14: хоткей чистого переключения раскладки (без конверсии). Буфер после
         // явной смены раскладки неактуален — тот же паттерн, что per-app restore и меню.
@@ -688,8 +693,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if textConverter.replaceTail(deleteCount: ctx.keys.count + bc, insert: text + spaces,
                                          undoOriginal: ctx.pair.original + spaces) {
                 keyboardMonitor.markConverted()
-                // Откат правки предлагает «в исключения», откат автозамены — нет (своё сокращение).
-                if case .fix = action { lastAutoConverted = (ctx.pair.original, Date()) } else { lastAutoConverted = nil }
+                // Откат опечатки или числа предлагает «в исключения». Автозамены — нет (своё
+                // сокращение), двух заглавных — тоже: в список ушло бы «когда» в нижнем регистре
+                // и навсегда выключило бы конверсию «rjulf» → «когда» (ревью I2).
+                if case .fix(_, let kind) = action, kind != .twoCaps {
+                    lastAutoConverted = (ctx.pair.original, Date())
+                } else {
+                    lastAutoConverted = nil
+                }
             }
         }
     }
@@ -752,15 +763,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// нет (сообщение уже ушло / фокус уехал), предложения «в исключения» тоже.
     private func handleWordEndSync(key: WordEndKey, keys: [TypedKey], keyCode: UInt16, flags: CGEventFlags) -> Bool {
         if AutoSwitchPolicy.shouldDeferToRemoteClient { return false }
-        if SpotlightAX.isActive() { return false }
+        // Решение — в колбэке tap'а, который держит клавишу. Дешёвые гейты идут первыми (внутри
+        // evaluateWordEnd), Spotlight (CGWindowList + AX) — только если есть что менять (ревью M3).
+        let started = Date()
         guard let (action, ctx) = evaluateWordEnd(keys: keys) else { return false }
+        if case .none = action { return false }
+        if SpotlightAX.isActive() { return false }
+        // Долгое решение (холодный AppleSpell) — не рискуем таймаутом tap'а: клавиша уходит как есть.
+        if Date().timeIntervalSince(started) > 0.2 { rslog("wordEnd: decision too slow — pass"); return false }
         let insert: String
         var switchLayout = false
+        var isTypo = false
         switch action {
         case .none:
             return false
-        case .expand(let text), .fix(let text, _):
+        case .expand(let text):
             insert = text
+        case .fix(let text, let kind):
+            insert = text
+            isTypo = kind == .typo
         case .convert(let core, let fixedCore):
             let suffix = String(ctx.pair.original.dropFirst(core))
             let coreKeys = suffix.isEmpty ? ctx.keys : Array(ctx.keys.prefix(core))
@@ -770,15 +791,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switchLayout = true
         }
         rslog("wordEnd \(key): replace \(ctx.keys.count) → \(insert.count)")
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.textConverter.replaceTail(deleteCount: ctx.keys.count, insert: insert,
-                                           repostKey: (keyCode, flags), clearInlineCompletion: true)
-            self.lastAutoConverted = nil
-            if switchLayout {
-                LayoutSwitcher.switchToOpposite()
-                self.updateStatusIcon()
-            }
+        // Сразу, без main.async (ревью M2): замена встаёт в очередь инжекта раньше, чем
+        // успеют прийти клавиши, нажатые после Enter.
+        let replaced = textConverter.replaceTail(deleteCount: ctx.keys.count, insert: insert,
+                                                 repostKey: (keyCode, flags), clearInlineCompletion: true,
+                                                 skipIfInlineCompletion: isTypo)
+        lastAutoConverted = nil
+        if replaced, switchLayout {   // ревью M1: замены не было — раскладку не трогаем
+            LayoutSwitcher.switchToOpposite()
+            updateStatusIcon()
         }
         return true
     }

@@ -41,6 +41,9 @@ enum TextFixes {
         guard c.count >= 3, c.allSatisfy({ $0.isLetter }),
               c[0].isUppercase, c[1].isUppercase,
               c[2...].allSatisfy({ $0.isLowercase }) else { return nil }
+        // «IDs», «PCs», «CDs» — множественное число аббревиатуры, а не опечатка (ревью I1:
+        // словарь принимает ids/pcs, и без этой проверки они становились «Ids», «Pcs»).
+        if String(c[2...]) == "s" { return nil }
         let fixed = String(c[0]) + String(c[1...]).lowercased()
         return isWord(fixed.lowercased()) ? fixed : nil
     }

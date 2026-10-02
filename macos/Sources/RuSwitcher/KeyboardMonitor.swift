@@ -77,6 +77,9 @@ final class KeyboardMonitor: @unchecked Sendable {
     fileprivate var interceptBoundaryKeys = false
     /// keyCode придержанной клавиши: её физический keyUp тоже глотаем, повтор шлёт пару сам.
     private var heldKeyUp: UInt16?
+    /// Активен ли tap (.defaultTap): тогда он держит каждое событие до ответа колбэка.
+    private(set) var tapIsActive = false
+    private var suspendDepth = 0
     /// issue #10: любой ввод/клик пользователя — чтобы спрятать флаг у каретки во время печати.
     var onUserInput: (() -> Void)?
     /// issue #10: включена ли фича флага-у-каретки. Гейтит диспатч onUserInput на горячем пути,
@@ -144,6 +147,7 @@ final class KeyboardMonitor: @unchecked Sendable {
         // Caps Lock и придержка Enter/Tab требуют активного tap (consume): подавить
         // переключение регистра / придержать клавишу. Иначе listenOnly — не вмешиваемся в ввод.
         let options: CGEventTapOptions = (triggerConfig.isCapsLock || interceptBoundaryKeys) ? .defaultTap : .listenOnly
+        tapIsActive = options == .defaultTap
         rslog("Tap options: \(options == .defaultTap ? "default" : "listenOnly") intercept=\(interceptBoundaryKeys)")
 
         // Режим удалённого стола: session-уровень видит проброшенные Screen Sharing
@@ -174,6 +178,8 @@ final class KeyboardMonitor: @unchecked Sendable {
     }
 
     func stop() {
+        tapIsActive = false
+        suspendDepth = 0
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -234,6 +240,9 @@ final class KeyboardMonitor: @unchecked Sendable {
     /// тоже; Tab — только без модификаторов (Shift+Tab — назад по полям). Cmd/Ctrl/Opt —
     /// как раньше (сброс буфера). true — клавиша придержана.
     fileprivate func holdBoundaryKey(keyCode: UInt16, flags: CGEventFlags, autorepeat: Bool) -> Bool {
+        // Ревью M4: новое нажатие той же клавиши — прежний keyUp уже не придёт (tap мог
+        // выключиться по таймауту), не глотаем чужой.
+        if heldKeyUp == keyCode, !autorepeat { heldKeyUp = nil }
         guard interceptBoundaryKeys, !autorepeat, currentWordLength > 0, !currentWordKeys.isEmpty else { return false }
         let mods = flags.intersection([.maskCommand, .maskControl, .maskAlternate])
         let settings = SettingsManager.shared
@@ -260,6 +269,26 @@ final class KeyboardMonitor: @unchecked Sendable {
         heldKeyUp = keyCode
         fullReset()
         return true
+    }
+
+    /// 3.5.0b (ревью C1): выполнить body с выключенным tap'ом. Активный tap держит каждое
+    /// событие, пока колбэк не ответит, а колбэк живёт в главном run loop: пути, которые с
+    /// главного потока шлют Cmd+C / Shift+Cmd+← и ждут эффекта в usleep, иначе получали бы
+    /// свои клавиши только после возврата. listenOnly-tap ничего не держит — там просто body.
+    /// Нажатия за время паузы буфер не видел — после неё сброс (вложенные вызовы — по счётчику).
+    func withTapSuspended<T>(_ body: () -> T) -> T {
+        guard tapIsActive, let tap = eventTap else { return body() }
+        suspendDepth += 1
+        if suspendDepth == 1 { CGEvent.tapEnable(tap: tap, enable: false) }
+        defer {
+            suspendDepth -= 1
+            if suspendDepth == 0 {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                fullReset()
+                heldKeyUp = nil
+            }
+        }
+        return body()
     }
 
     /// keyUp придержанной клавиши глотаем: повтор шлёт свою пару down/up.

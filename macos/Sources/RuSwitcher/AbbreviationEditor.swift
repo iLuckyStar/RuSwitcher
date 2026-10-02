@@ -132,7 +132,9 @@ final class AbbreviationEditor: NSObject, NSTableViewDataSource, NSTableViewDele
         alert.addButton(withTitle: L10n.commonCancel)
         alert.window.initialFirstResponder = shortField
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        return Abbreviations.sanitize([Abbreviation(short: shortField.stringValue, full: fullField.stringValue)]).first
+        let clean = Abbreviations.sanitize([Abbreviation(short: shortField.stringValue, full: fullField.stringValue)]).first
+        if clean == nil { NSSound.beep() }   // ревью M8: пусто, пробел в сокращении или слишком длинно
+        return clean
     }
 
     private func persist() {
