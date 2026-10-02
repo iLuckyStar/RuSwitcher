@@ -128,9 +128,11 @@ final class KeyboardMonitor: @unchecked Sendable {
         }
         rslog("Attempting to create event tap... (trigger=\(SettingsManager.shared.triggerKey) hotkeys=\(detectors.keys.map(\.rawValue).sorted()) capsLock=\(triggerConfig.isCapsLock))")
         // 3.5.0b: Enter/Tab на конце слова придерживаем — нужен активный tap и keyUp в маске.
-        // В режиме удалённого стола не перехватываем: там клавиши приходят символами.
+        // Режим удалённого стола не мешает: проброшенные Screen Sharing клавиши приходят с
+        // keyCode 0 и под Enter/Tab не попадают, а фокус в клиенте удалёнки отсекает
+        // handleWordEndSync (shouldDeferToRemoteClient).
         let settings = SettingsManager.shared
-        interceptBoundaryKeys = !settings.remoteDesktopMode && (settings.wordEndOnEnter || settings.wordEndOnTab)
+        interceptBoundaryKeys = settings.wordEndOnEnter || settings.wordEndOnTab
         heldKeyUp = nil
         var mask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue)
@@ -586,7 +588,7 @@ private func keyboardCallback(
             return Unmanaged.passUnretained(event)
         }
         // 3.5.0b: Enter/Tab на конце слова — придержать, приложение отправит клавишу само.
-        if !remote, monitor.holdBoundaryKey(keyCode: keyCode, flags: event.flags,
+        if monitor.holdBoundaryKey(keyCode: keyCode, flags: event.flags,
                                             autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0) {
             return nil
         }
