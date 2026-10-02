@@ -240,7 +240,7 @@ else
     WT="$TMPDIR_PUB/main"
     run git worktree add -q --detach "$WT" origin/main
     if [ "$DRY" = 1 ]; then
-        echo "  [dry-run] скопировать $FEED_FILE в worktree main, коммит «$MSG», push origin HEAD:main"
+        echo "  [dry-run] скопировать $FEED_FILE в worktree main, коммит «${MSG}», push origin HEAD:main"
     else
         cp "$FEED_FILE" "$WT/$FEED_FILE"
         if git -C "$WT" diff --quiet -- "$FEED_FILE"; then ok "в main фид уже такой"
