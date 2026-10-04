@@ -29,4 +29,16 @@ std::optional<std::wstring> fix_number(const std::vector<TypedKey>& keys, std::w
 // Cycles the case of text: lower -> UPPER -> Title -> lower.
 std::wstring next_case(std::wstring_view text);
 
+// Checks if character is in Cyrillic script.
+bool is_cyrillic_char(wchar_t c) noexcept;
+
+// Checks if character is in Latin script.
+bool is_latin_char(wchar_t c) noexcept;
+
+// Bidirectionally converts text between two layouts (Layout 1 <-> Layout 2) in a single pass.
+// Each Latin character is converted to Cyrillic, and each Cyrillic character is converted to Latin.
+// If layouts are null, falls back to the canonical EN (QWERTY) <-> RU (ЙЦУКЕН) mapping.
+std::wstring convert_text_bidirectional(std::wstring_view text, HKL layout1 = nullptr, HKL layout2 = nullptr);
+
 }  // namespace ruswitcher
+

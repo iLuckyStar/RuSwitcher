@@ -72,27 +72,75 @@ bool shortcut_modifier_down() noexcept {
            (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
 }
 
+bool is_shell_window(HWND window) noexcept {
+    if (!window || !IsWindow(window)) return true;
+    wchar_t class_name[64]{};
+    GetClassNameW(window, class_name, static_cast<int>(std::size(class_name)));
+    if (lstrcmpW(class_name, L"Shell_TrayWnd") == 0 ||
+        lstrcmpW(class_name, L"Shell_SecondaryTrayWnd") == 0 ||
+        lstrcmpW(class_name, L"Progman") == 0 ||
+        lstrcmpW(class_name, L"WorkerW") == 0 ||
+        lstrcmpW(class_name, L"TrayNotifyWnd") == 0 ||
+        lstrcmpW(class_name, L"NotifyIconOverflowWindow") == 0 ||
+        lstrcmpW(class_name, L"TopLevelWindowForOverflowXamlIsland") == 0 ||
+        lstrcmpW(class_name, L"Windows.UI.Core.CoreWindow") == 0 ||
+        lstrcmpW(class_name, L"XamlExplorerHostIslandWindow") == 0 ||
+        lstrcmpW(class_name, L"#32768") == 0) {
+        return true;
+    }
+    const LONG ex_style = GetWindowLongW(window, GWL_EXSTYLE);
+    if ((ex_style & WS_EX_TOOLWINDOW) != 0 && (ex_style & WS_EX_APPWINDOW) == 0) {
+        return true;
+    }
+    return false;
+}
+
 bool useful_foreground(HWND window, HWND own_window) noexcept {
     if (!window || window == own_window || !IsWindow(window)) return false;
     DWORD process{};
     GetWindowThreadProcessId(window, &process);
     if (process == GetCurrentProcessId()) return false;
-    wchar_t class_name[64]{};
-    GetClassNameW(window, class_name, static_cast<int>(std::size(class_name)));
-    return lstrcmpW(class_name, L"Shell_TrayWnd") != 0 &&
-           lstrcmpW(class_name, L"Shell_SecondaryTrayWnd") != 0 &&
-           lstrcmpW(class_name, L"Progman") != 0 && lstrcmpW(class_name, L"WorkerW") != 0 &&
-           lstrcmpW(class_name, L"#32768") != 0;
+    return !is_shell_window(window);
 }
 
-void restore_target_focus(HWND target) noexcept {
-    if (!target || !IsWindow(target)) return;
+HWND get_previous_active_window(HWND own_window) noexcept {
+    HWND hwnd = GetTopWindow(GetDesktopWindow());
+    const DWORD own_pid = GetCurrentProcessId();
+    while (hwnd) {
+        if (hwnd != own_window && IsWindow(hwnd) && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+            DWORD pid{};
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != own_pid && !is_shell_window(hwnd)) {
+                const int title_len = GetWindowTextLengthW(hwnd);
+                const LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+                if (title_len > 0 && (style & WS_VISIBLE) != 0) {
+                    return hwnd;
+                }
+            }
+        }
+        hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+    }
+    return nullptr;
+}
+
+void restore_target_focus(HWND target, HWND own_window = nullptr) noexcept {
+    if (!target || !IsWindow(target) || is_shell_window(target)) {
+        target = get_previous_active_window(own_window);
+        if (!target || !IsWindow(target)) return;
+    }
 
     HWND root = GetAncestor(target, GA_ROOT);
     if (!root) root = target;
 
     const HWND current_fore = GetForegroundWindow();
     if (current_fore == root || current_fore == target) return;
+
+    LockSetForegroundWindow(LSFW_UNLOCK);
+    AllowSetForegroundWindow(ASFW_ANY);
+
+    // Neutral Alt key tap to grant SetForegroundWindow permission
+    keybd_event(VK_MENU, 0, 0, 0);
+    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
 
     const DWORD current_tid = GetCurrentThreadId();
     const DWORD target_tid = GetWindowThreadProcessId(root, nullptr);
@@ -107,6 +155,8 @@ void restore_target_focus(HWND target) noexcept {
 
     if (IsIconic(root)) {
         ShowWindow(root, SW_RESTORE);
+    } else {
+        ShowWindow(root, SW_SHOW);
     }
 
     BringWindowToTop(root);
@@ -120,12 +170,12 @@ void restore_target_focus(HWND target) noexcept {
         AttachThreadInput(current_tid, target_tid, FALSE);
     }
 
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 30; ++i) {
         HWND active = GetForegroundWindow();
         if (active == root || active == target) break;
         Sleep(10);
     }
-    Sleep(40);
+    Sleep(50);
 }
 
 HKL current_layout() noexcept {
@@ -192,36 +242,9 @@ void add_text_pair(std::vector<std::pair<wchar_t, wchar_t>>& pairs, DWORD vk, bo
 }
 
 std::wstring convert_text(const std::wstring& text, HKL source, HKL target) {
-    std::vector<std::pair<wchar_t, wchar_t>> pairs;
-    pairs.reserve(96);
-    for (DWORD vk = '0'; vk <= '9'; ++vk) {
-        add_text_pair(pairs, vk, false, source, target);
-        add_text_pair(pairs, vk, true, source, target);
-    }
-    for (DWORD vk = 'A'; vk <= 'Z'; ++vk) {
-        add_text_pair(pairs, vk, false, source, target);
-        add_text_pair(pairs, vk, true, source, target);
-    }
-    constexpr DWORD oem_keys[]{VK_OEM_1, VK_OEM_PLUS,  VK_OEM_COMMA, VK_OEM_MINUS,
-                               VK_OEM_PERIOD, VK_OEM_2, VK_OEM_3,     VK_OEM_4,
-                               VK_OEM_5,      VK_OEM_6, VK_OEM_7,     VK_OEM_8,
-                               VK_OEM_102};
-    for (const DWORD vk : oem_keys) {
-        add_text_pair(pairs, vk, false, source, target);
-        add_text_pair(pairs, vk, true, source, target);
-    }
-
-    std::wstring result = text;
-    for (auto& character : result) {
-        for (const auto& pair : pairs) {
-            if (character == pair.first) {
-                character = pair.second;
-                break;
-            }
-        }
-    }
-    return result;
+    return convert_text_bidirectional(text, source, target);
 }
+
 
 bool is_trailing_punctuation(wchar_t character) noexcept {
     switch (character) {
@@ -460,6 +483,27 @@ struct Engine::Impl {
         }
         return first_other_layout(current);
     }
+
+    HKL layout_for_language(LANGID lang_id) const noexcept {
+        const HKL candidates[]{first_layout, second_layout, current_layout()};
+        for (HKL hkl : candidates) {
+            if (hkl && PRIMARYLANGID(LOWORD(reinterpret_cast<ULONG_PTR>(hkl))) == lang_id) {
+                return hkl;
+            }
+        }
+        const int count = GetKeyboardLayoutList(0, nullptr);
+        if (count > 0) {
+            std::vector<HKL> list(static_cast<std::size_t>(count));
+            GetKeyboardLayoutList(count, list.data());
+            for (HKL hkl : list) {
+                if (hkl && PRIMARYLANGID(LOWORD(reinterpret_cast<ULONG_PTR>(hkl))) == lang_id) {
+                    return hkl;
+                }
+            }
+        }
+        return nullptr;
+    }
+
 
     void clear_word() noexcept {
         word.clear();
@@ -760,23 +804,33 @@ struct Engine::Impl {
             clipboard.restore();
             return false;
         }
-        std::wstring converted = convert_text(selected, source, target);
-        HKL final_target = target;
+        std::wstring converted = convert_text_bidirectional(selected, source, target);
         if (converted == selected) {
-            std::wstring reverse_converted = convert_text(selected, target, source);
-            if (reverse_converted != selected) {
-                converted = std::move(reverse_converted);
-                final_target = source;
-            } else {
-                clipboard.restore();
-                return false;
-            }
+            clipboard.restore();
+            return false;
         }
         if (!clipboard.restore()) {
             return false;
         }
         if (!replace_text(0, converted)) {
             return false;
+        }
+
+        HKL final_target = target;
+        wchar_t last_letter = 0;
+        for (wchar_t c : converted) {
+            if (is_cyrillic_char(c) || is_latin_char(c)) {
+                last_letter = c;
+            }
+        }
+        if (last_letter != 0) {
+            if (is_cyrillic_char(last_letter)) {
+                HKL ru = layout_for_language(LANG_RUSSIAN);
+                if (ru) final_target = ru;
+            } else if (is_latin_char(last_letter)) {
+                HKL en = layout_for_language(LANG_ENGLISH);
+                if (en) final_target = en;
+            }
         }
         switch_layout(final_target);
 
@@ -1014,9 +1068,7 @@ struct Engine::Impl {
 
     void convert_line() noexcept {
         if (!enabled) return;
-        if (last_foreground && IsWindow(last_foreground)) {
-            restore_target_focus(last_foreground);
-        }
+        restore_target_focus(last_foreground, message_window);
         if (is_protected_foreground()) return;
         clear_all();
 
@@ -1025,7 +1077,7 @@ struct Engine::Impl {
 
         // 2. Select current line (Home -> Shift+End)
         if (!send_line_selection()) return;
-        Sleep(40);
+        Sleep(60);
 
         if (!convert_selection(true)) {
             // Unselect on no-op so line does not stay highlighted
@@ -1036,9 +1088,7 @@ struct Engine::Impl {
 
     void change_case() noexcept {
         if (!enabled) return;
-        if (last_foreground && IsWindow(last_foreground)) {
-            restore_target_focus(last_foreground);
-        }
+        restore_target_focus(last_foreground, message_window);
         if (is_protected_foreground()) return;
 
         const HWND foreground = GetForegroundWindow();

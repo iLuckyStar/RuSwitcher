@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cwctype>
+#include <unordered_map>
 
 namespace ruswitcher {
 
@@ -132,4 +133,138 @@ std::wstring next_case(std::wstring_view text) {
     return result;
 }
 
+namespace {
+
+struct CharPair {
+    wchar_t en;
+    wchar_t ru;
+};
+
+constexpr CharPair kEnRuPairs[] = {
+    // Lowercase
+    {L'q', L'й'}, {L'w', L'ц'}, {L'e', L'у'}, {L'r', L'к'}, {L't', L'е'}, {L'y', L'н'},
+    {L'u', L'г'}, {L'i', L'ш'}, {L'o', L'щ'}, {L'p', L'з'}, {L'[', L'х'}, {L']', L'ъ'},
+    {L'a', L'ф'}, {L's', L'ы'}, {L'd', L'в'}, {L'f', L'а'}, {L'g', L'п'}, {L'h', L'р'},
+    {L'j', L'о'}, {L'k', L'л'}, {L'l', L'д'}, {L';', L'ж'}, {L'\'', L'э'},
+    {L'z', L'я'}, {L'x', L'ч'}, {L'c', L'с'}, {L'v', L'м'}, {L'b', L'и'}, {L'n', L'т'},
+    {L'm', L'ь'}, {L',', L'б'}, {L'.', L'ю'}, {L'/', L'.'},
+    {L'\\', L'ё'}, {L'`', L'ё'},
+    // Uppercase
+    {L'Q', L'Й'}, {L'W', L'Ц'}, {L'E', L'У'}, {L'R', L'К'}, {L'T', L'Е'}, {L'Y', L'Н'},
+    {L'U', L'Г'}, {L'I', L'Ш'}, {L'O', L'Щ'}, {L'P', L'З'}, {L'{', L'Х'}, {L'}', L'Ъ'},
+    {L'A', L'Ф'}, {L'S', L'Ы'}, {L'D', L'В'}, {L'F', L'А'}, {L'G', L'П'}, {L'H', L'Р'},
+    {L'J', L'О'}, {L'K', L'Л'}, {L'L', L'Д'}, {L':', L'Ж'}, {L'\"', L'Э'},
+    {L'Z', L'Я'}, {L'X', L'Ч'}, {L'C', L'С'}, {L'V', L'М'}, {L'B', L'И'}, {L'N', L'Т'},
+    {L'M', L'Ь'}, {L'<', L'Б'}, {L'>', L'Ю'}, {L'?', L','},
+    {L'|', L'Ё'}, {L'~', L'Ё'}
+};
+
+bool translate_single_key(DWORD vk, DWORD scan, bool shift, HKL layout, wchar_t& out) noexcept {
+    std::array<BYTE, 256> state{};
+    if (shift) state[VK_SHIFT] = 0x80;
+    wchar_t buf[8]{};
+    const int len = ToUnicodeEx(vk, scan, state.data(), buf, static_cast<int>(std::size(buf)), 0x4, layout);
+    if (len == 1) {
+        out = buf[0];
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+bool is_cyrillic_char(wchar_t c) noexcept {
+    return (c >= 0x0400 && c <= 0x04FF) || c == 0x0500;
+}
+
+bool is_latin_char(wchar_t c) noexcept {
+    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
+}
+
+std::wstring convert_text_bidirectional(std::wstring_view text, HKL layout1, HKL layout2) {
+    if (text.empty()) return {};
+
+    std::unordered_map<wchar_t, wchar_t> map;
+    map.reserve(128);
+
+    if (layout1 && layout2 && layout1 != layout2) {
+        std::unordered_map<wchar_t, wchar_t> forward;
+        std::unordered_map<wchar_t, wchar_t> backward;
+        forward.reserve(96);
+        backward.reserve(96);
+
+        constexpr DWORD oem_keys[]{
+            VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS,
+            VK_OEM_PERIOD, VK_OEM_2, VK_OEM_3, VK_OEM_4,
+            VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_8, VK_OEM_102
+        };
+
+        auto query_pairs = [&](HKL src, HKL tgt, std::unordered_map<wchar_t, wchar_t>& out_map) {
+            auto process_vk = [&](DWORD vk, bool shift) {
+                const DWORD scan = MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC, src);
+                wchar_t ch_src = 0, ch_tgt = 0;
+                if (translate_single_key(vk, scan, shift, src, ch_src) &&
+                    translate_single_key(vk, scan, shift, tgt, ch_tgt) &&
+                    ch_src != ch_tgt && ch_src != 0 && ch_tgt != 0) {
+                    out_map.emplace(ch_src, ch_tgt);
+                }
+            };
+
+            for (DWORD vk = '0'; vk <= '9'; ++vk) {
+                process_vk(vk, false);
+                process_vk(vk, true);
+            }
+            for (DWORD vk = 'A'; vk <= 'Z'; ++vk) {
+                process_vk(vk, false);
+                process_vk(vk, true);
+            }
+            for (DWORD vk : oem_keys) {
+                process_vk(vk, false);
+                process_vk(vk, true);
+            }
+        };
+
+        query_pairs(layout1, layout2, forward);
+        query_pairs(layout2, layout1, backward);
+
+        map = forward;
+        for (const auto& [k, v] : backward) {
+            auto it = map.find(k);
+            if (it != map.end()) {
+                if (!iswalpha(it->second) && iswalpha(v)) {
+                    it->second = v;
+                }
+            } else {
+                map[k] = v;
+            }
+        }
+    }
+
+    // Static canonical fallback for standard EN <-> RU pairs
+    for (const auto& p : kEnRuPairs) {
+        if (map.find(p.en) == map.end()) {
+            map[p.en] = p.ru;
+        }
+        if (p.ru == L'ё') {
+            if (map.find(L'ё') == map.end()) map[L'ё'] = L'`';
+        } else if (p.ru == L'Ё') {
+            if (map.find(L'Ё') == map.end()) map[L'Ё'] = L'~';
+        } else {
+            auto it = map.find(p.ru);
+            if (it == map.end() || (!iswalpha(it->second) && iswalpha(p.en))) {
+                map[p.ru] = p.en;
+            }
+        }
+    }
+
+    std::wstring result;
+    result.reserve(text.size());
+    for (wchar_t ch : text) {
+        auto it = map.find(ch);
+        result.push_back(it != map.end() ? it->second : ch);
+    }
+    return result;
+}
+
 }  // namespace ruswitcher
+

@@ -103,12 +103,40 @@ void test_fix_number() {
     std::cout << "[PASS] FixNumber tests\n";
 }
 
+void test_convert_text_bidirectional() {
+    // 1. Exact string from user report:
+    const std::wstring mixed = L"llllllllllllllllддддддддддддддддllllllllддддддддддддlllllllllllllдддддllll";
+    const std::wstring expected = L"ддддддддддддддддllllllllllllllllддддддддllllllllllllдддддддддддддllllldddd";
+    const std::wstring actual = convert_text_bidirectional(mixed);
+    assert(actual == expected);
+
+    // 2. Round-trip idempotency
+    const std::wstring roundtrip = convert_text_bidirectional(actual);
+    assert(roundtrip == mixed);
+
+    // 3. English to Russian
+    assert(convert_text_bidirectional(L"ghbdtn") == L"привет");
+
+    // 4. Russian to English
+    assert(convert_text_bidirectional(L"руддщ") == L"hello");
+
+    // 5. Cased sentence
+    assert(convert_text_bidirectional(L"Ghbdtn Vbh!") == L"Привет Мир!");
+
+    // 6. Mixed sentence (macOS parity issue #22A)
+    assert(convert_text_bidirectional(L"ghtlkj d ьшчув") == L"продол в mixed");
+
+    std::cout << "[PASS] Bidirectional conversion tests (including user's mixed string)\n";
+}
+
 int main() {
     std::cout << "Running RuSwitcher native unit tests...\n";
     test_brand_words();
     test_two_caps();
     test_next_case();
     test_fix_number();
+    test_convert_text_bidirectional();
     std::cout << "All native unit tests PASSED successfully!\n";
     return 0;
 }
+

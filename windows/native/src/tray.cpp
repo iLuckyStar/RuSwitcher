@@ -172,10 +172,19 @@ struct Tray::Impl {
 
         POINT point{};
         GetCursorPos(&point);
+        engine.remember_foreground();
         SetForegroundWindow(window);
-        TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, point.x, point.y, 0, window, nullptr);
-        PostMessageW(window, WM_NULL, 0, 0);
+        const UINT cmd = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RETURNCMD,
+                                        point.x, point.y, 0, window, nullptr);
         DestroyMenu(menu);
+        PostMessageW(window, WM_NULL, 0, 0);
+
+        if (cmd != 0) {
+            if (cmd == kCommandLine || cmd == kCommandChangeCase) {
+                Sleep(50);
+            }
+            command(cmd);
+        }
     }
 
     void command(UINT id) noexcept {
