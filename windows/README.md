@@ -1,6 +1,6 @@
 # RuSwitcher for Windows
 
-**Status: beta.** A tray application built on the same philosophy as the macOS original —
+**Status: 0.9.2 beta 4.** A tray application built on the same philosophy as the macOS original —
 zero external dependencies, no telemetry, local dictionaries, keycode-based conversion.
 
 ## Features (parity with the macOS version)
@@ -8,7 +8,8 @@ zero external dependencies, no telemetry, local dictionaries, keycode-based conv
 - **Manual trigger** — double-tap Ctrl (default), double-tap Shift, or the Pause/Break key.
   Converts the last typed word, the current selection, or the whole line into the other layout,
   and switches the keyboard. Trigger it again with nothing typed since to reverse (toggle).
-- **Whole-line conversion** (issue #24) — convert the entire current line, not just the last word.
+- **Whole-line conversion** (issue #24) — convert the entire current line, not just the last word,
+  including a keyboard-buffer fallback for Windows Terminal and other console hosts.
 - **Smart selection conversion** (issue #22) — keeps words that are already correct, flips only the
   gibberish (dictionary-driven).
 - **Trailing punctuation** kept literally (issue #15) — `ghbdtn,` → `привет,`.
@@ -21,6 +22,11 @@ zero external dependencies, no telemetry, local dictionaries, keycode-based conv
 - **Layout sound** (issue #7) and a **layout indicator** in the tray menu.
 - **Launch at startup**, **auto-update check**, and a settings window.
 - **Localized UI** — English and Russian (more languages to follow; falls back to English).
+
+The conversion engine has no application allowlist or compatibility routing by executable name.
+Typed words and lines use RuSwitcher's own keyboard buffer; pre-existing selections probe keyboard
+copy and then native focused-control copy based on the control's actual response. Notepad, Chrome,
+Edge, ChatGPT/Codex, WinForms and Windows Terminal remain the regression matrix, not special cases.
 
 ## Engine mapping
 
@@ -44,6 +50,8 @@ dotnet test    windows/tests/RuSwitcher.Win.Tests/RuSwitcher.Win.Tests.csproj -c
 dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj -c Release -r win-x64 `
   --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
+
+For native Windows on ARM, replace `win-x64` with `win-arm64`.
 
 The project sets `EnableWindowsTargeting`, so it also **compiles** on macOS/Linux (a fast
 compile-check); the real build/test/exe come from the `windows-build` CI on a Windows runner. The

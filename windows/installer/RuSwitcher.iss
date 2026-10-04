@@ -11,14 +11,21 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
+#ifndef MyAppNumericVersion
+  #define MyAppNumericVersion "0.0.0.0"
+#endif
 #ifndef SourceExe
-  #define SourceExe "..\src\RuSwitcher.Win\bin\Release\net8.0-windows\win-x64\publish\RuSwitcher.exe"
+  #define SourceExe "..\..\.artifacts\native-x64\RuSwitcher.exe"
+#endif
+#ifndef MyAppArch
+  #define MyAppArch "x64"
 #endif
 
 #define MyAppName "RuSwitcher"
 #define MyAppPublisher "RuSwitcher"
 #define MyAppURL "https://github.com/rashn/RuSwitcher"
 #define MyAppExeName "RuSwitcher.exe"
+#define MyAppCopyright "Copyright (c) 2026 RuSwitcher contributors"
 
 [Setup]
 ; A stable AppId ties upgrades/uninstalls together across versions — never change it.
@@ -26,6 +33,7 @@ AppId={{A3F5C1E2-7B94-4D6A-9E31-2C8F5A1B6D40}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppCopyright={#MyAppCopyright}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}/releases
@@ -34,12 +42,31 @@ DisableProgramGroupPage=yes
 ; Per-user install → no UAC elevation needed (matches a menu-bar utility's footprint).
 PrivilegesRequired=lowest
 OutputDir=dist
-OutputBaseFilename=RuSwitcher-Setup-{#MyAppVersion}
+OutputBaseFilename=RuSwitcher-Setup-{#MyAppVersion}-{#MyAppArch}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoCopyright={#MyAppCopyright}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoOriginalFileName=RuSwitcher-Setup.exe
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppNumericVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppNumericVersion}
+VersionInfoTextVersion={#MyAppVersion}
+SetupIconFile=..\src\RuSwitcher.Win\Assets\RuSwitcher.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+CloseApplications=yes
+RestartApplications=no
+AppMutex=RuSwitcher
+#if MyAppArch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

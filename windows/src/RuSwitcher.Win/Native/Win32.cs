@@ -7,12 +7,20 @@ internal static class Win32
 {
     // --- Hook ---
     public const int WH_KEYBOARD_LL = 13;
+    public const int WH_MOUSE_LL = 14;
     public const int HC_ACTION = 0;
     public const int WM_KEYDOWN = 0x0100;
     public const int WM_SYSKEYDOWN = 0x0104;
     public const int WM_KEYUP = 0x0101;
     public const int WM_SYSKEYUP = 0x0105;
     public const uint LLKHF_INJECTED = 0x10;
+    public const int WM_LBUTTONDOWN = 0x0201;
+    public const int WM_RBUTTONDOWN = 0x0204;
+    public const int WM_MBUTTONDOWN = 0x0207;
+    public const uint WM_COPY = 0x0301;
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
+    public const int GWL_STYLE = -16;
+    public const int ES_PASSWORD = 0x0020;
 
     // Marker written into the dwExtraInfo of our own injected events, so the hook can
     // ignore them (the Windows counterpart of the macOS kRuSwitcherEventMarker userData).
@@ -29,9 +37,13 @@ internal static class Win32
     }
 
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+    public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetWindowsHookExW(int idHook, LowLevelKeyboardProc lpfn, IntPtr hmod, uint dwThreadId);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW", SetLastError = true)]
+    public static extern IntPtr SetWindowsHookExMouseW(int idHook, LowLevelMouseProc lpfn, IntPtr hmod, uint dwThreadId);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -69,6 +81,49 @@ internal static class Win32
     [DllImport("user32.dll")]
     public static extern void PostQuitMessage(int nExitCode);
 
+    [DllImport("user32.dll")]
+    public static extern uint GetClipboardSequenceNumber();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseClipboard();
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,
+        uint flags, uint timeout, out IntPtr result);
+
     // --- Scancode <-> character (the ToUnicodeEx analog of Carbon UCKeyTranslate) ---
     [DllImport("user32.dll")]
     public static extern IntPtr GetKeyboardLayout(uint idThread);
@@ -80,9 +135,10 @@ internal static class Win32
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetKeyboardState(byte[] lpKeyState);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int ToUnicodeEx(uint wVirtKey, uint wScanCode, byte[] lpKeyState,
-        [Out] char[] pwszBuff, int cchBuff, uint wFlags, IntPtr dwhkl);
+        [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pwszBuff,
+        int cchBuff, uint wFlags, IntPtr dwhkl);
 
     [DllImport("user32.dll")]
     public static extern short GetKeyState(int nVirtKey);
@@ -94,7 +150,11 @@ internal static class Win32
     public static extern short GetAsyncKeyState(int nVirtKey);
 
     public const int VK_SHIFT = 0x10;
+    public const int VK_CONTROL_STATE = 0x11;
+    public const int VK_MENU = 0x12;
     public const int VK_CAPITAL = 0x14;
+    public const int VK_LWIN = 0x5B;
+    public const int VK_RWIN = 0x5C;
     // Триггер-клавиши (issue #24 Windows): выделенные клавиши + модификаторы для double-tap.
     public const uint VK_PAUSE = 0x13;
     public const uint VK_SCROLL = 0x91;
@@ -152,6 +212,7 @@ internal static class Win32
 
     // --- Injection (SendInput + KEYEVENTF_UNICODE; the CGEvent keyboardSetUnicodeString analog) ---
     public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_UNICODE = 0x0004;
     public const ushort VK_BACK = 0x08;
@@ -205,6 +266,9 @@ internal static class Win32
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     // --- Tray icon (Shell_NotifyIcon) + hidden message window ---
     public const uint NIM_ADD = 0x00000000;

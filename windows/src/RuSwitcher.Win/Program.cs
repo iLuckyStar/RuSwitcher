@@ -21,6 +21,18 @@ internal static class Program
         string logPath = Path.Combine(logDir, "debug.log");
         void Log(string line) => File.AppendAllText(logPath, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
 
+        // Only one process may own the global low-level keyboard hook. Multiple instances would
+        // observe the same physical keystrokes and race to inject converted text.
+        using var singleInstance = new Mutex(initiallyOwned: true, @"Local\RuSwitcher", out bool isFirstInstance);
+        if (!isFirstInstance)
+        {
+            Log("startup skipped: another RuSwitcher instance is already running");
+            return;
+        }
+
+        ApplicationConfiguration.Initialize();
+        AutoStart.RefreshIfEnabled();
+
         // Capture crashes to the log instead of dying silently (a tester can then send debug.log).
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         { try { Log("FATAL: " + (e.ExceptionObject as Exception)?.ToString()); } catch { /* ignore */ } };
@@ -31,6 +43,17 @@ internal static class Program
         var buffer = new KeystrokeBuffer();
         bool enabled = true;
         List<TypedKey>? pendingAuto = null;   // word snapshot handed to the message loop for auto-convert
+        void InvalidateBuffer()
+        {
+            pendingAuto = null;
+            buffer.Reset();
+            Converter.ClearReconvert();
+        }
+        bool ShortcutModifierDown() =>
+            (GetAsyncKeyState(VK_CONTROL_STATE) & 0x8000) != 0
+            || (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
+            || (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0
+            || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
 
         // Auto-conversion checks the dictionary on the message loop; warm the COM spell-checker for the
         // actually-installed layout languages now, so the first auto-convert of the session isn't slow.
@@ -56,26 +79,53 @@ internal static class Program
         switchDetector.Triggered += () =>
         {
             if (enabled && settings.SwitchTriggerEnabled && LayoutSwitcher.Opposite() is { } opp)
+            {
                 LayoutSwitcher.SwitchTo(opp);
+                InvalidateBuffer();
+            }
         };
 
         tray.TriggerActivated += () =>
         {
             if (!enabled) return;
+            int wordKeys = buffer.CurrentWord.Count;
+            int lineKeys = buffer.CurrentLine.Count;
+            string app = TriggerRouting.ForegroundProcessName();
+            if (InputSafety.IsProtectedForeground())
+            {
+                InvalidateBuffer();
+                Log($"trigger: acted=False, app={app}, wordKeys={wordKeys}, lineKeys={lineKeys}, " +
+                    "reason=protected/password field");
+                return;
+            }
             // Trigger again with nothing typed since = reverse the last conversion (toggle);
             // else whole-line mode → convert the line; else convert the typed word; else the selection.
-            bool acted;
-            if (Converter.CanReconvert && buffer.IsEmpty) acted = Converter.Reconvert();
-            else if (settings.ConvertWholeLine) { acted = Converter.ConvertLine(settings.SmartConversion); if (acted) buffer.Reset(); }
-            else if (!buffer.IsEmpty) acted = Converter.ConvertLastWord(buffer);
-            else acted = Converter.ConvertSelection(settings.SmartConversion);
-            Log($"trigger: acted={acted}");
+            TriggerAction action = TriggerRouting.Decide(settings.ConvertWholeLine,
+                Converter.CanReconvert, wordKeys, lineKeys);
+            bool acted = action switch
+            {
+                TriggerAction.Reconvert => Converter.Reconvert(),
+                TriggerAction.BufferedWord => Converter.ConvertLastWord(buffer),
+                TriggerAction.BufferedLine => Converter.ConvertBufferedLine(buffer.CurrentLine,
+                    settings.SmartConversion),
+                TriggerAction.SystemLine => Converter.ConvertLine(settings.SmartConversion),
+                _ => Converter.ConvertSelection(settings.SmartConversion),
+            };
+            if (acted && action is TriggerAction.BufferedLine or TriggerAction.SystemLine)
+                buffer.Reset();
+            Log($"trigger: action={action}, acted={acted}, app={app}, wordKeys={wordKeys}, lineKeys={lineKeys}" +
+                (acted ? "" : $", reason={Converter.LastDiagnostic}"));
         };
         tray.AutoConvertActivated += () =>
         {
             // Deferred off the hook callback: the real Space has already landed, so TryConvertWord
             // deletes the word + that space and re-types the converted word + space (or keeps it).
-            if (pendingAuto is { } w) { AutoConverter.TryConvertWord(w); pendingAuto = null; }
+            if (pendingAuto is { } w)
+            {
+                AutoConverter.TryConvertWord(w);
+                pendingAuto = null;
+                buffer.Reset(); // auto retyped text no longer matches the captured physical line
+            }
         };
         tray.EnabledChanged += on => { enabled = on; Log($"enabled = {on}"); };
         tray.TriggerChanged += kind => { detector.Kind = kind; Log($"trigger set: {kind}"); };  // Settings written by the tray
@@ -104,6 +154,17 @@ internal static class Program
             detector.OnKeyDown(vk);
             switchDetector.OnKeyDown(vk);
 
+            if (vk == KeystrokeBuffer.VK_BACK)
+            {
+                if (ShortcutModifierDown()) InvalidateBuffer();
+                else
+                {
+                    buffer.Backspace();
+                    Converter.ClearReconvert();
+                }
+                return;
+            }
+
             if (KeystrokeBuffer.IsWordBoundary(vk))
             {
                 // As-you-type auto conversion (beta): on Space, arm a deferred check. We snapshot the
@@ -115,19 +176,34 @@ internal static class Program
                     pendingAuto = new List<TypedKey>(buffer.CurrentWord);
                     tray.PostAutoConvert();
                 }
-                buffer.Reset();
+                if (vk == KeystrokeBuffer.VK_SPACE)
+                {
+                    bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                    bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+                    buffer.AppendSpace(new TypedKey(vk, sc, shift, caps));
+                }
+                else buffer.Reset();
                 return;
             }
 
             if (KeystrokeBuffer.IsTypingKey(vk))
             {
+                if (ShortcutModifierDown())
+                {
+                    InvalidateBuffer();
+                    return;
+                }
                 Converter.ClearReconvert();  // typing changed the word — the pending undo no longer applies
                 // GetAsyncKeyState = real hardware state; GetKeyState would be stale on the hook thread.
                 bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
                 bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
                 buffer.Append(new TypedKey(vk, sc, shift, caps));
             }
-            // Modifiers and other keys: leave the buffer as-is.
+            else if (KeystrokeBuffer.InvalidatesWord(vk))
+            {
+                InvalidateBuffer();
+            }
+            // Plain modifiers leave the buffer as-is so a double-tap can convert it.
         };
         hook.KeyUp += (vk, sc) =>
         {
@@ -137,13 +213,19 @@ internal static class Program
         };
         hook.Install();
 
+        using var mouseHook = new MouseHook();
+        mouseHook.Clicked += InvalidateBuffer;
+        mouseHook.Install();
+
         // Per-app layout memory (issue): restores each app's last-used layout on focus. Off by default.
         using var appTracker = new AppLayoutTracker();
+        appTracker.ForegroundChanged += InvalidateBuffer;
         appTracker.Install();
 
         Updater.CheckOnLaunch(ui);   // silent, throttled once-a-day, off the startup path
 
-        Log($"RuSwitcher.Win started — hook + tray up, trigger={settings.Trigger}");
+        Log($"RuSwitcher.Win started — hook + tray up, trigger={settings.Trigger}, " +
+            $"wholeLine={settings.ConvertWholeLine}, smart={settings.SmartConversion}");
 
         // Message loop: required for both the LL hook callbacks and the tray window.
         while (GetMessageW(out MSG msg, IntPtr.Zero, 0, 0) > 0)

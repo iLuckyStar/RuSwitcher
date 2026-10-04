@@ -11,8 +11,15 @@ namespace RuSwitcher.Win.Core;
 /// </summary>
 internal static class TextInjector
 {
-    public static void Replace(int backspaces, string text)
+    public static string LastDiagnostic { get; private set; } = "";
+
+    public static bool Replace(int backspaces, string text)
     {
+        if (InputSafety.IsProtectedForeground())
+        {
+            LastDiagnostic = "protected/password field";
+            return false;
+        }
         var inputs = new List<INPUT>(backspaces * 2 + text.Length * 2);
 
         for (int i = 0; i < backspaces; i++)
@@ -27,33 +34,88 @@ internal static class TextInjector
         }
 
         var arr = inputs.ToArray();
-        SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        return Send(arr);
     }
 
-    /// <summary>Send Ctrl+<paramref name="vk"/> (e.g. Ctrl+C / Ctrl+V).</summary>
-    public static void SendCtrl(ushort vk) => SendChord(VK_CONTROL, vk);
+    /// <summary>Send a copy-style Ctrl chord. Chromium on Windows ARM64 ignores a generic
+    /// VK_CONTROL SendInput chord but accepts the concrete left-Control virtual key. keybd_event is
+    /// deliberately limited to this compatibility fallback; the marker still keeps our hook out.</summary>
+    public static bool SendCtrl(ushort vk)
+    {
+        UIntPtr marker = (UIntPtr)InjectedMarker;
+        byte scan = (byte)MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC, GetKeyboardLayout(0));
+        keybd_event((byte)VK_LCONTROL, 0x1D, KEYEVENTF_EXTENDEDKEY, marker);
+        keybd_event((byte)vk, scan, 0, marker);
+        keybd_event((byte)vk, scan, KEYEVENTF_KEYUP, marker);
+        keybd_event((byte)VK_LCONTROL, 0x1D, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, marker);
+        LastDiagnostic = "";
+        return true;
+    }
 
     /// <summary>Send Shift+<paramref name="vk"/> (e.g. Shift+Home to select to line start).</summary>
-    public static void SendShift(ushort vk) => SendChord((ushort)VK_SHIFT, vk);
+    public static bool SendShift(ushort vk) => SendChord((ushort)VK_SHIFT, vk);
 
     /// <summary>Send a single plain key press (e.g. End to collapse a selection).</summary>
-    public static void SendKey(ushort vk)
+    public static bool SendKey(ushort vk)
     {
-        var inputs = new[] { Key(vk, '\0', dwFlags: 0), Key(vk, '\0', dwFlags: KEYEVENTF_KEYUP) };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        uint flags = ExtendedFlag(vk);
+        var inputs = new[]
+        {
+            Key(vk, '\0', dwFlags: flags),
+            Key(vk, '\0', dwFlags: flags | KEYEVENTF_KEYUP),
+        };
+        return Send(inputs);
+    }
+
+    /// <summary>Wait until the physical trigger chord is fully released. Injecting another chord
+    /// while Ctrl/Shift/Alt/Win is still down can turn Shift+Home into Ctrl+Shift+Home or make a
+    /// fallback Ctrl+C indistinguishable from the user's trigger.</summary>
+    public static void WaitForPhysicalModifiersReleased(int timeoutMs = 300)
+    {
+        long deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            bool down = (GetAsyncKeyState(VK_CONTROL_STATE) & 0x8000) != 0
+                     || (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0
+                     || (GetAsyncKeyState(VK_MENU) & 0x8000) != 0
+                     || (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0
+                     || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+            if (!down) break;
+            Thread.Sleep(5);
+        }
+        Thread.Sleep(20); // let the foreground application consume the final key-up
     }
 
     // modVk + vk as one chord. Carries the injected marker so our own hook ignores it.
-    private static void SendChord(ushort modVk, ushort vk)
+    private static bool SendChord(ushort modVk, ushort vk)
     {
+        uint flags = ExtendedFlag(vk);
         var inputs = new[]
         {
             Key(modVk, '\0', dwFlags: 0),
-            Key(vk, '\0', dwFlags: 0),
-            Key(vk, '\0', dwFlags: KEYEVENTF_KEYUP),
+            Key(vk, '\0', dwFlags: flags),
+            Key(vk, '\0', dwFlags: flags | KEYEVENTF_KEYUP),
             Key(modVk, '\0', dwFlags: KEYEVENTF_KEYUP),
         };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        return Send(inputs);
+    }
+
+    private static uint ExtendedFlag(ushort vk) => vk is
+        0x21 or 0x22 or 0x23 or 0x24 or // PageUp, PageDown, End, Home
+        0x25 or 0x26 or 0x27 or 0x28 or // arrows
+        0x2D or 0x2E                    // Insert, Delete
+            ? KEYEVENTF_EXTENDEDKEY : 0;
+
+    /// <summary>True only when Windows accepted every requested event. SendInput may return a
+    /// partial count (or zero) without throwing; treating that as success corrupts the user's text.</summary>
+    private static bool Send(INPUT[] inputs)
+    {
+        if (inputs.Length == 0) { LastDiagnostic = ""; return true; }
+        int inputSize = Marshal.SizeOf<INPUT>();
+        uint sent = SendInput((uint)inputs.Length, inputs, inputSize);
+        if (sent == (uint)inputs.Length) { LastDiagnostic = ""; return true; }
+        LastDiagnostic = $"SendInput sent {sent}/{inputs.Length}, cbSize={inputSize}, error={Marshal.GetLastWin32Error()}";
+        return false;
     }
 
     private static INPUT Key(ushort vk, char scanChar, uint dwFlags) => new()
