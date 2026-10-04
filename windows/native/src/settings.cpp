@@ -40,6 +40,18 @@ bool read_bool(HKEY key, const wchar_t* name, bool default_val) noexcept {
     return default_val;
 }
 
+DWORD read_dword(HKEY key, const wchar_t* name, DWORD default_val) noexcept {
+    DWORD value = default_val;
+    DWORD type{};
+    DWORD size = sizeof(value);
+    if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size) ==
+            ERROR_SUCCESS &&
+        type == REG_DWORD) {
+        return value;
+    }
+    return default_val;
+}
+
 HKL match_layout(ULONG_PTR saved, const std::vector<LayoutChoice>& layouts) noexcept {
     if (!saved) return nullptr;
     for (const auto& layout : layouts) {
@@ -64,6 +76,40 @@ std::wstring layout_name(HKL layout) {
 
 }  // namespace
 
+const wchar_t* Settings::trigger_name(TriggerKey key) noexcept {
+    switch (key) {
+        case TriggerKey::CtrlDoubleTap: return L"Двойной Ctrl";
+        case TriggerKey::ShiftDoubleTap: return L"Двойной Shift";
+        case TriggerKey::AltDoubleTap: return L"Двойной Alt";
+        case TriggerKey::CapsLock: return L"Caps Lock";
+        case TriggerKey::PauseBreak: return L"Pause / Break";
+        default: return L"Неизвестно";
+    }
+}
+
+const wchar_t* Settings::switch_name(SwitchKey key) noexcept {
+    switch (key) {
+        case SwitchKey::Off: return L"Выключено";
+        case SwitchKey::CapsLock: return L"Caps Lock (RU ↔ EN)";
+        case SwitchKey::ShiftDoubleTap: return L"Двойной Shift";
+        case SwitchKey::CtrlDoubleTap: return L"Двойной Ctrl";
+        case SwitchKey::AltDoubleTap: return L"Двойной Alt";
+        case SwitchKey::PauseBreak: return L"Pause / Break";
+        default: return L"Выключено";
+    }
+}
+
+const wchar_t* Settings::case_name(CaseKey key) noexcept {
+    switch (key) {
+        case CaseKey::Off: return L"Выключено";
+        case CaseKey::PauseBreak: return L"Pause / Break";
+        case CaseKey::ShiftDoubleTap: return L"Двойной Shift";
+        case CaseKey::CtrlDoubleTap: return L"Двойной Ctrl";
+        case CaseKey::AltDoubleTap: return L"Двойной Alt";
+        default: return L"Выключено";
+    }
+}
+
 Settings::Settings() noexcept {
     const int count = GetKeyboardLayoutList(0, nullptr);
     if (count > 0) {
@@ -79,9 +125,15 @@ Settings::Settings() noexcept {
     ULONG_PTR saved_second{};
     if (key) {
         enabled_ = read_bool(key, L"Enabled", true);
+        trigger_ = static_cast<TriggerKey>(read_dword(key, L"Trigger", static_cast<DWORD>(TriggerKey::CtrlDoubleTap)));
+        switch_hotkey_ = static_cast<SwitchKey>(read_dword(key, L"SwitchHotkey", static_cast<DWORD>(SwitchKey::CapsLock)));
+        case_hotkey_ = static_cast<CaseKey>(read_dword(key, L"CaseHotkey", static_cast<DWORD>(CaseKey::Off)));
         fix_two_caps_ = read_bool(key, L"FixTwoCaps", true);
         fix_numbers_ = read_bool(key, L"FixNumbers", true);
         auto_convert_ = read_bool(key, L"AutoConvert", false);
+        convert_whole_line_ = read_bool(key, L"ConvertWholeLine", false);
+        sound_on_switch_ = read_bool(key, L"SoundOnSwitch", false);
+        word_end_enter_tab_ = read_bool(key, L"WordEndEnterTab", true);
         saved_first = read_layout(key, L"FirstLayout");
         saved_second = read_layout(key, L"SecondLayout");
         RegCloseKey(key);
@@ -121,9 +173,31 @@ void Settings::save_bool(const wchar_t* name, bool value) noexcept {
     RegCloseKey(key);
 }
 
+void Settings::save_dword(const wchar_t* name, DWORD value) noexcept {
+    HKEY key = open_settings(KEY_SET_VALUE);
+    if (!key) return;
+    RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    RegCloseKey(key);
+}
+
 void Settings::set_enabled(bool value) noexcept {
     enabled_ = value;
     save_bool(L"Enabled", value);
+}
+
+void Settings::set_trigger(TriggerKey value) noexcept {
+    trigger_ = value;
+    save_dword(L"Trigger", static_cast<DWORD>(value));
+}
+
+void Settings::set_switch_hotkey(SwitchKey value) noexcept {
+    switch_hotkey_ = value;
+    save_dword(L"SwitchHotkey", static_cast<DWORD>(value));
+}
+
+void Settings::set_case_hotkey(CaseKey value) noexcept {
+    case_hotkey_ = value;
+    save_dword(L"CaseHotkey", static_cast<DWORD>(value));
 }
 
 void Settings::set_fix_two_caps(bool value) noexcept {
@@ -139,6 +213,21 @@ void Settings::set_fix_numbers(bool value) noexcept {
 void Settings::set_auto_convert(bool value) noexcept {
     auto_convert_ = value;
     save_bool(L"AutoConvert", value);
+}
+
+void Settings::set_convert_whole_line(bool value) noexcept {
+    convert_whole_line_ = value;
+    save_bool(L"ConvertWholeLine", value);
+}
+
+void Settings::set_sound_on_switch(bool value) noexcept {
+    sound_on_switch_ = value;
+    save_bool(L"SoundOnSwitch", value);
+}
+
+void Settings::set_word_end_enter_tab(bool value) noexcept {
+    word_end_enter_tab_ = value;
+    save_bool(L"WordEndEnterTab", value);
 }
 
 void Settings::save_layout(const wchar_t* name, HKL value) noexcept {

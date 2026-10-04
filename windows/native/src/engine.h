@@ -16,6 +16,7 @@ public:
 
     bool install() noexcept;
     void convert_or_undo() noexcept;
+    void switch_layout_direct() noexcept;
     void convert_line() noexcept;
     void change_case() noexcept;
     void on_boundary_triggered() noexcept;

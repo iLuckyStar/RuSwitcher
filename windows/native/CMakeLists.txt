@@ -25,6 +25,7 @@ add_executable(RuSwitcherNative WIN32
     src/dict.cpp
     src/input_safety.cpp
     src/settings.cpp
+    src/settings_dialog.cpp
     src/text_fixes.cpp
     src/tray.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/resources.rc
@@ -32,7 +33,7 @@ add_executable(RuSwitcherNative WIN32
 
 target_compile_features(RuSwitcherNative PRIVATE cxx_std_20)
 target_compile_definitions(RuSwitcherNative PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(RuSwitcherNative PRIVATE user32 shell32 advapi32 ole32 urlmon uiautomationcore)
+target_link_libraries(RuSwitcherNative PRIVATE user32 shell32 advapi32 ole32 comctl32 urlmon uiautomationcore)
 
 if(MSVC)
     target_compile_options(RuSwitcherNative PRIVATE /O1 /Os /GL /Gy /Gw /utf-8 /permissive- /W4)

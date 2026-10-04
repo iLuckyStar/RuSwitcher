@@ -21,10 +21,20 @@ namespace {
 constexpr ULONG_PTR kInjectedMarker = 0x52555357;
 constexpr UINT kTriggerMessage = WM_APP + 1;
 constexpr UINT kBoundaryMessage = WM_APP + 3;
+constexpr UINT kSwitchMessage = WM_APP + 4;
+constexpr UINT kCaseMessage = WM_APP + 5;
 constexpr ULONGLONG kDoubleTapWindowMs = 350;
 
 bool is_control(DWORD vk) noexcept {
     return vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL;
+}
+
+bool is_shift(DWORD vk) noexcept {
+    return vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT;
+}
+
+bool is_alt(DWORD vk) noexcept {
+    return vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU;
 }
 
 bool is_typing_key(DWORD vk) noexcept {
@@ -250,10 +260,32 @@ std::size_t editing_length(const std::wstring& text) noexcept {
 }
 
 void switch_layout(HKL layout) noexcept {
+    if (!layout) return;
     const HWND foreground = GetForegroundWindow();
-    if (foreground)
-        PostMessageW(foreground, WM_INPUTLANGCHANGEREQUEST, 0,
-                     reinterpret_cast<LPARAM>(layout));
+    if (!foreground) return;
+
+    const DWORD current_thread = GetCurrentThreadId();
+    const DWORD target_thread = GetWindowThreadProcessId(foreground, nullptr);
+
+    HWND target_wnd = foreground;
+    GUITHREADINFO gui{sizeof(gui)};
+    if (GetGUIThreadInfo(target_thread, &gui) && gui.hwndFocus) {
+        target_wnd = gui.hwndFocus;
+    }
+
+    if (target_thread && target_thread != current_thread) {
+        if (AttachThreadInput(current_thread, target_thread, TRUE)) {
+            ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
+            AttachThreadInput(current_thread, target_thread, FALSE);
+        }
+    } else {
+        ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
+    }
+
+    PostMessageW(target_wnd, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
+    if (target_wnd != foreground) {
+        PostMessageW(foreground, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
+    }
 }
 
 bool is_all_caps(std::wstring_view text) noexcept {
@@ -268,11 +300,9 @@ bool is_all_caps(std::wstring_view text) noexcept {
 }
 
 bool looks_like_code(std::wstring_view text) noexcept {
-    // CamelCase check (capital after first letter)
     for (std::size_t i = 1; i < text.size(); ++i) {
         if (iswupper(text[i])) return true;
     }
-    // Mixed Latin and Cyrillic script check
     bool latin = false;
     bool cyrillic = false;
     for (wchar_t c : text) {
@@ -289,7 +319,6 @@ bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
                          HKL source, HKL target, bool caps) noexcept {
     if (typed.size() < 3) return false;
 
-    // Must be letters or apostrophe
     for (wchar_t c : typed) {
         if (!iswalpha(c) && c != L'\'' && c != L'\x2019') return false;
     }
@@ -311,11 +340,16 @@ bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
     lower_typed.reserve(typed.size());
     for (wchar_t c : typed) lower_typed.push_back(static_cast<wchar_t>(towlower(c)));
 
-    // If source word is already valid in current layout, do not convert
     if (Dict::is_valid_word(lower_typed, source)) return false;
 
     return true;
 }
+
+struct ModTracker {
+    bool down{};
+    bool other_pressed{};
+    ULONGLONG last_tap{};
+};
 
 }  // namespace
 
@@ -326,16 +360,19 @@ struct Engine::Impl {
     HHOOK mouse_hook{};
     HWINEVENTHOOK foreground_hook{};
     HWINEVENTHOOK focus_hook{};
+
     std::vector<TypedKey> word;
+    std::vector<TypedKey> prev_word;
+    int boundary_count{};
     HWND word_owner{};
     HWND last_foreground{};
     bool enabled{true};
     HKL first_layout{};
     HKL second_layout{};
 
-    bool control_down{};
-    bool other_during_control{};
-    ULONGLONG last_control_tap{};
+    ModTracker ctrl_tracker{};
+    ModTracker shift_tracker{};
+    ModTracker alt_tracker{};
 
     bool undo_available{};
     std::wstring screen_text;
@@ -367,6 +404,8 @@ struct Engine::Impl {
 
     void clear_all() noexcept {
         clear_word();
+        prev_word.clear();
+        boundary_count = 0;
         undo_available = false;
         screen_text.clear();
         alternate_text.clear();
@@ -375,18 +414,56 @@ struct Engine::Impl {
         pending_boundary_owner = nullptr;
     }
 
+    void dispatch_double_tap(TriggerKey t_match, SwitchKey s_match, CaseKey c_match) noexcept {
+        if (settings) {
+            if (settings->switch_hotkey() == s_match) {
+                PostMessageW(message_window, kSwitchMessage, 0, 0);
+                return;
+            }
+            if (settings->trigger() == t_match) {
+                PostMessageW(message_window, kTriggerMessage, 0, 0);
+                return;
+            }
+            if (settings->case_hotkey() == c_match) {
+                PostMessageW(message_window, kCaseMessage, 0, 0);
+                return;
+            }
+        } else if (t_match == TriggerKey::CtrlDoubleTap) {
+            PostMessageW(message_window, kTriggerMessage, 0, 0);
+        }
+    }
+
     void on_key_down(DWORD vk, DWORD scan) {
         if (!enabled) return;
+
         if (is_control(vk)) {
-            if (!control_down) {
-                control_down = true;
-                other_during_control = false;
+            if (!ctrl_tracker.down) {
+                ctrl_tracker.down = true;
+                ctrl_tracker.other_pressed = false;
+            }
+            return;
+        }
+        if (is_shift(vk)) {
+            if (!shift_tracker.down) {
+                shift_tracker.down = true;
+                shift_tracker.other_pressed = false;
+            }
+            return;
+        }
+        if (is_alt(vk)) {
+            if (!alt_tracker.down) {
+                alt_tracker.down = true;
+                alt_tracker.other_pressed = false;
             }
             return;
         }
 
-        if (control_down) other_during_control = true;
-        last_control_tap = 0;
+        if (ctrl_tracker.down) ctrl_tracker.other_pressed = true;
+        if (shift_tracker.down) shift_tracker.other_pressed = true;
+        if (alt_tracker.down) alt_tracker.other_pressed = true;
+        ctrl_tracker.last_tap = 0;
+        shift_tracker.last_tap = 0;
+        alt_tracker.last_tap = 0;
 
         if (vk == VK_BACK) {
             undo_available = false;
@@ -403,11 +480,18 @@ struct Engine::Impl {
             if (vk == VK_SPACE || vk == VK_RETURN || vk == VK_TAB) {
                 const HWND foreground = GetForegroundWindow();
                 if (!word.empty() && word_owner && word_owner == foreground) {
+                    prev_word = word;
+                    boundary_count = 1;
                     pending_boundary_word = word;
                     pending_boundary_vk = vk;
                     pending_boundary_owner = word_owner;
                     PostMessageW(message_window, kBoundaryMessage, 0, 0);
+                } else if (!prev_word.empty()) {
+                    ++boundary_count;
                 }
+            } else {
+                prev_word.clear();
+                boundary_count = 0;
             }
             clear_word();
             undo_available = false;
@@ -421,7 +505,11 @@ struct Engine::Impl {
             }
             const HWND foreground = GetForegroundWindow();
             if (word_owner && foreground != word_owner) clear_word();
-            if (word.empty()) word_owner = foreground;
+            if (word.empty()) {
+                word_owner = foreground;
+                prev_word.clear();
+                boundary_count = 0;
+            }
 
             const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
             const bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
@@ -434,18 +522,50 @@ struct Engine::Impl {
 
     void on_key_up(DWORD vk) noexcept {
         if (!enabled) return;
-        if (!is_control(vk)) return;
-        const bool tap = control_down && !other_during_control;
-        control_down = false;
-        other_during_control = false;
-        if (!tap) return;
 
-        const ULONGLONG now = GetTickCount64();
-        if (last_control_tap && now - last_control_tap <= kDoubleTapWindowMs) {
-            last_control_tap = 0;
-            PostMessageW(message_window, kTriggerMessage, 0, 0);
-        } else {
-            last_control_tap = now;
+        if (is_control(vk)) {
+            const bool tap = ctrl_tracker.down && !ctrl_tracker.other_pressed;
+            ctrl_tracker.down = false;
+            ctrl_tracker.other_pressed = false;
+            if (!tap) return;
+            const ULONGLONG now = GetTickCount64();
+            if (ctrl_tracker.last_tap && now - ctrl_tracker.last_tap <= kDoubleTapWindowMs) {
+                ctrl_tracker.last_tap = 0;
+                dispatch_double_tap(TriggerKey::CtrlDoubleTap, SwitchKey::CtrlDoubleTap, CaseKey::CtrlDoubleTap);
+            } else {
+                ctrl_tracker.last_tap = now;
+            }
+            return;
+        }
+
+        if (is_shift(vk)) {
+            const bool tap = shift_tracker.down && !shift_tracker.other_pressed;
+            shift_tracker.down = false;
+            shift_tracker.other_pressed = false;
+            if (!tap) return;
+            const ULONGLONG now = GetTickCount64();
+            if (shift_tracker.last_tap && now - shift_tracker.last_tap <= kDoubleTapWindowMs) {
+                shift_tracker.last_tap = 0;
+                dispatch_double_tap(TriggerKey::ShiftDoubleTap, SwitchKey::ShiftDoubleTap, CaseKey::ShiftDoubleTap);
+            } else {
+                shift_tracker.last_tap = now;
+            }
+            return;
+        }
+
+        if (is_alt(vk)) {
+            const bool tap = alt_tracker.down && !alt_tracker.other_pressed;
+            alt_tracker.down = false;
+            alt_tracker.other_pressed = false;
+            if (!tap) return;
+            const ULONGLONG now = GetTickCount64();
+            if (alt_tracker.last_tap && now - alt_tracker.last_tap <= kDoubleTapWindowMs) {
+                alt_tracker.last_tap = 0;
+                dispatch_double_tap(TriggerKey::AltDoubleTap, SwitchKey::AltDoubleTap, CaseKey::AltDoubleTap);
+            } else {
+                alt_tracker.last_tap = now;
+            }
+            return;
         }
     }
 
@@ -453,6 +573,43 @@ struct Engine::Impl {
         if (code == HC_ACTION && instance) {
             const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
             if (key->dwExtraInfo != kInjectedMarker) {
+                // 1. CapsLock Interception (macOS parity & Punto-style)
+                if (key->vkCode == VK_CAPITAL && instance->settings) {
+                    const bool is_switch_caps = (instance->settings->switch_hotkey() == SwitchKey::CapsLock);
+                    const bool is_trig_caps = (instance->settings->trigger() == TriggerKey::CapsLock);
+                    if (is_switch_caps || is_trig_caps) {
+                        const bool shift_held = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                        if (!shift_held) {
+                            if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+                                if (is_switch_caps) {
+                                    PostMessageW(instance->message_window, kSwitchMessage, 0, 0);
+                                } else {
+                                    PostMessageW(instance->message_window, kTriggerMessage, 0, 0);
+                                }
+                            }
+                            return 1; // Suppress CapsLock state change
+                        }
+                    }
+                }
+
+                // 2. Pause / Break Interception
+                if (key->vkCode == VK_PAUSE && instance->settings) {
+                    if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+                        if (instance->settings->switch_hotkey() == SwitchKey::PauseBreak) {
+                            PostMessageW(instance->message_window, kSwitchMessage, 0, 0);
+                            return 1;
+                        }
+                        if (instance->settings->trigger() == TriggerKey::PauseBreak) {
+                            PostMessageW(instance->message_window, kTriggerMessage, 0, 0);
+                            return 1;
+                        }
+                        if (instance->settings->case_hotkey() == CaseKey::PauseBreak) {
+                            PostMessageW(instance->message_window, kCaseMessage, 0, 0);
+                            return 1;
+                        }
+                    }
+                }
+
                 if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
                     instance->on_key_down(key->vkCode, key->scanCode);
                 else if (message == WM_KEYUP || message == WM_SYSKEYUP)
@@ -532,22 +689,18 @@ struct Engine::Impl {
         }
         std::wstring selected;
         if (!copy_current_selection(selected)) {
-            log_event(L"selection failed: copy");
             clipboard.restore();
             return false;
         }
         std::wstring converted = convert_text(selected, source, target);
         if (converted == selected) {
-            log_event(L"selection failed: mapping no-op");
             clipboard.restore();
             return false;
         }
         if (!clipboard.restore()) {
-            log_event(L"selection failed: restore");
             return false;
         }
         if (!replace_text(0, converted)) {
-            log_event(L"selection failed: inject");
             return false;
         }
         switch_layout(target);
@@ -650,6 +803,20 @@ struct Engine::Impl {
         }
     }
 
+    void switch_layout_direct() noexcept {
+        if (!enabled) return;
+        const HKL source = current_layout();
+        const HKL target = target_layout(source);
+        if (!source || !target) return;
+
+        switch_layout(target);
+        clear_all();
+
+        if (settings && settings->sound_on_switch()) {
+            MessageBeep(MB_OK);
+        }
+    }
+
     void convert_or_undo() noexcept {
         if (!enabled) return;
         if (is_protected_foreground()) {
@@ -667,46 +834,107 @@ struct Engine::Impl {
             return;
         }
 
-        if (word.empty() || !word_owner || word_owner != GetForegroundWindow()) {
-            clear_word();
-            convert_selection(true);
+        if (settings && settings->convert_whole_line()) {
+            convert_line();
             return;
         }
 
+        // Case A: Word in active buffer
+        if (!word.empty() && word_owner == GetForegroundWindow()) {
+            const HKL source = current_layout();
+            const HKL target = target_layout(source);
+            if (!source || !target) return;
+
+            std::size_t core_count = word.size();
+            std::wstring suffix;
+            while (core_count > 0) {
+                wchar_t source_character{};
+                if (!translate_key(word[core_count - 1], source, source_character) ||
+                    !is_trailing_punctuation(source_character))
+                    break;
+                suffix.insert(suffix.begin(), source_character);
+                --core_count;
+            }
+            if (core_count == 0) return;
+
+            std::wstring original;
+            std::wstring converted;
+            if (!translate_keys(word, core_count, source, original) ||
+                !translate_keys(word, core_count, target, converted) || converted.empty())
+                return;
+            original += suffix;
+            converted += suffix;
+            if (original == converted) return;
+
+            if (!replace_text(word.size(), converted)) return;
+            switch_layout(target);
+
+            screen_text = std::move(converted);
+            alternate_text = std::move(original);
+            screen_layout = target;
+            alternate_layout = source;
+            undo_available = true;
+            clear_word();
+            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+            return;
+        }
+
+        // Case B: Word was just completed with boundary (macOS parity with prevWordKeys)
+        if (word.empty() && !prev_word.empty() && boundary_count > 0 && word_owner == GetForegroundWindow()) {
+            const HKL source = current_layout();
+            const HKL target = target_layout(source);
+            if (source && target) {
+                std::size_t core_count = prev_word.size();
+                std::wstring suffix;
+                while (core_count > 0) {
+                    wchar_t source_character{};
+                    if (!translate_key(prev_word[core_count - 1], source, source_character) ||
+                        !is_trailing_punctuation(source_character))
+                        break;
+                    suffix.insert(suffix.begin(), source_character);
+                    --core_count;
+                }
+                if (core_count > 0) {
+                    std::wstring original;
+                    std::wstring converted;
+                    if (translate_keys(prev_word, core_count, source, original) &&
+                        translate_keys(prev_word, core_count, target, converted) && !converted.empty()) {
+                        original += suffix;
+                        converted += suffix;
+                        std::wstring spaces(static_cast<std::size_t>(boundary_count), L' ');
+                        const std::size_t to_delete = prev_word.size() + boundary_count;
+                        if (replace_text(to_delete, converted + spaces)) {
+                            switch_layout(target);
+                            screen_text = converted + spaces;
+                            alternate_text = original + spaces;
+                            screen_layout = target;
+                            alternate_layout = source;
+                            undo_available = true;
+                            prev_word.clear();
+                            boundary_count = 0;
+                            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Case C: Try selection conversion
+        if (convert_selection(true)) {
+            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+            return;
+        }
+
+        // Case D: Buffer is empty and nothing is selected -> SWITCH LAYOUT DIRECTLY!
+        // This ensures pressing the key ALWAYS performs a meaningful action.
         const HKL source = current_layout();
         const HKL target = target_layout(source);
-        if (!source || !target) return;
-
-        std::size_t core_count = word.size();
-        std::wstring suffix;
-        while (core_count > 0) {
-            wchar_t source_character{};
-            if (!translate_key(word[core_count - 1], source, source_character) ||
-                !is_trailing_punctuation(source_character))
-                break;
-            suffix.insert(suffix.begin(), source_character);
-            --core_count;
+        if (source && target) {
+            switch_layout(target);
+            clear_all();
+            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
         }
-        if (core_count == 0) return;
-
-        std::wstring original;
-        std::wstring converted;
-        if (!translate_keys(word, core_count, source, original) ||
-            !translate_keys(word, core_count, target, converted) || converted.empty())
-            return;
-        original += suffix;
-        converted += suffix;
-        if (original == converted) return;
-
-        if (!replace_text(word.size(), converted)) return;
-        switch_layout(target);
-
-        screen_text = std::move(converted);
-        alternate_text = std::move(original);
-        screen_layout = target;
-        alternate_layout = source;
-        undo_available = true;
-        clear_word();
     }
 
     void convert_line() noexcept {
@@ -775,6 +1003,7 @@ Engine::Engine(HWND message_window, Settings* settings) noexcept
 Engine::~Engine() { delete impl_; }
 bool Engine::install() noexcept { return impl_->install(); }
 void Engine::convert_or_undo() noexcept { impl_->convert_or_undo(); }
+void Engine::switch_layout_direct() noexcept { impl_->switch_layout_direct(); }
 void Engine::convert_line() noexcept { impl_->convert_line(); }
 void Engine::change_case() noexcept { impl_->change_case(); }
 void Engine::on_boundary_triggered() noexcept { impl_->on_boundary_triggered(); }
