@@ -28,6 +28,10 @@ jobs:
         run: cmake -S windows/native -B build/native-${{ matrix.architecture }} -A ${{ matrix.architecture }}
       - name: Build compact native target
         run: cmake --build build/native-${{ matrix.architecture }} --config Release
+      - name: Run native unit tests (x64)
+        if: matrix.architecture == 'x64'
+        run: build/native-${{ matrix.architecture }}/Release/RuSwitcherNativeTests.exe
+
       - name: Enforce standalone executable budget
         shell: pwsh
         run: >

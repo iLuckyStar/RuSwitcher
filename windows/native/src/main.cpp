@@ -8,6 +8,7 @@
 
 namespace {
 constexpr UINT kTriggerMessage = WM_APP + 1;
+constexpr UINT kBoundaryMessage = WM_APP + 3;
 ruswitcher::Engine* g_engine{};
 ruswitcher::Tray* g_tray{};
 
@@ -16,14 +17,16 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         g_engine->convert_or_undo();
         return 0;
     }
+    if (message == kBoundaryMessage && g_engine) {
+        g_engine->on_boundary_triggered();
+        return 0;
+    }
     LRESULT result{};
     if (g_tray && g_tray->handle(message, wparam, lparam, result)) return result;
     return DefWindowProcW(window, message, wparam, lparam);
 }
 }
 
-// Migration target for the compact native Windows client. The C# beta remains the behavioural
-// oracle until hook, conversion, tray, clipboard and settings scenarios pass here one by one.
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HANDLE single_instance = CreateMutexW(nullptr, TRUE, L"Local\\RuSwitcher");
     if (!single_instance || GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -52,8 +55,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    ruswitcher::Engine engine(window);
     ruswitcher::Settings settings;
+    ruswitcher::Engine engine(window, &settings);
     engine.set_enabled(settings.enabled());
     engine.set_layout_pair(settings.first_layout(), settings.second_layout());
     g_engine = &engine;

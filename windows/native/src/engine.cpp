@@ -1,11 +1,16 @@
 #include "engine.h"
 
+#include "brand_words.h"
 #include "clipboard.h"
 #include "diagnostics.h"
+#include "dict.h"
 #include "input_safety.h"
+#include "settings.h"
+#include "text_fixes.h"
 
 #include <array>
 #include <cstdint>
+#include <cwctype>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,14 +20,8 @@ namespace {
 
 constexpr ULONG_PTR kInjectedMarker = 0x52555357;
 constexpr UINT kTriggerMessage = WM_APP + 1;
+constexpr UINT kBoundaryMessage = WM_APP + 3;
 constexpr ULONGLONG kDoubleTapWindowMs = 350;
-
-struct TypedKey {
-    DWORD vk;
-    DWORD scan;
-    bool shift;
-    bool caps;
-};
 
 bool is_control(DWORD vk) noexcept {
     return vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL;
@@ -112,7 +111,7 @@ bool translate_keys(const std::vector<TypedKey>& keys, std::size_t count, HKL la
                     std::wstring& text) {
     text.clear();
     text.reserve(count);
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t index = 0; index < count && index < keys.size(); ++index) {
         wchar_t character{};
         if (!translate_key(keys[index], layout, character)) return false;
         text.push_back(character);
@@ -225,6 +224,11 @@ bool replace_text(std::size_t characters_to_delete, const std::wstring& replacem
             inputs.push_back(key_input(VK_RETURN, 0, KEYEVENTF_KEYUP));
             continue;
         }
+        if (character == L'\t') {
+            inputs.push_back(key_input(VK_TAB, 0, 0));
+            inputs.push_back(key_input(VK_TAB, 0, KEYEVENTF_KEYUP));
+            continue;
+        }
         inputs.push_back(key_input(0, static_cast<WORD>(character), KEYEVENTF_UNICODE));
         inputs.push_back(
             key_input(0, static_cast<WORD>(character), KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
@@ -252,12 +256,72 @@ void switch_layout(HKL layout) noexcept {
                      reinterpret_cast<LPARAM>(layout));
 }
 
+bool is_all_caps(std::wstring_view text) noexcept {
+    bool has_letter = false;
+    for (wchar_t c : text) {
+        if (iswalpha(c)) {
+            has_letter = true;
+            if (!iswupper(c)) return false;
+        }
+    }
+    return has_letter;
+}
+
+bool looks_like_code(std::wstring_view text) noexcept {
+    // CamelCase check (capital after first letter)
+    for (std::size_t i = 1; i < text.size(); ++i) {
+        if (iswupper(text[i])) return true;
+    }
+    // Mixed Latin and Cyrillic script check
+    bool latin = false;
+    bool cyrillic = false;
+    for (wchar_t c : text) {
+        if ((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z')) {
+            latin = true;
+        } else if (c >= 0x0400 && c <= 0x04FF) {
+            cyrillic = true;
+        }
+    }
+    return latin && cyrillic;
+}
+
+bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
+                         HKL source, HKL target, bool caps) noexcept {
+    if (typed.size() < 3) return false;
+
+    // Must be letters or apostrophe
+    for (wchar_t c : typed) {
+        if (!iswalpha(c) && c != L'\'' && c != L'\x2019') return false;
+    }
+
+    if (!caps) {
+        if (is_all_caps(typed)) return false;
+        if (looks_like_code(typed)) return false;
+    }
+
+    std::wstring lower_converted;
+    lower_converted.reserve(converted.size());
+    for (wchar_t c : converted) lower_converted.push_back(static_cast<wchar_t>(towlower(c)));
+
+    const bool target_is_brand = (converted.size() >= 4 && is_brand_word(lower_converted));
+    const bool valid_target = target_is_brand || Dict::is_valid_word(lower_converted, target);
+    if (!valid_target) return false;
+
+    std::wstring lower_typed;
+    lower_typed.reserve(typed.size());
+    for (wchar_t c : typed) lower_typed.push_back(static_cast<wchar_t>(towlower(c)));
+
+    // If source word is already valid in current layout, do not convert
+    if (Dict::is_valid_word(lower_typed, source)) return false;
+
+    return true;
+}
+
 }  // namespace
 
 struct Engine::Impl {
-    explicit Impl(HWND window) noexcept : message_window(window) {}
-
     HWND message_window{};
+    Settings* settings{};
     HHOOK keyboard_hook{};
     HHOOK mouse_hook{};
     HWINEVENTHOOK foreground_hook{};
@@ -279,7 +343,14 @@ struct Engine::Impl {
     HKL screen_layout{};
     HKL alternate_layout{};
 
+    std::vector<TypedKey> pending_boundary_word;
+    DWORD pending_boundary_vk{};
+    HWND pending_boundary_owner{};
+
     static Impl* instance;
+
+    explicit Impl(HWND window, Settings* prefs) noexcept
+        : message_window(window), settings(prefs) {}
 
     HKL target_layout(HKL current) const noexcept {
         if (first_layout && second_layout) {
@@ -299,6 +370,9 @@ struct Engine::Impl {
         undo_available = false;
         screen_text.clear();
         alternate_text.clear();
+        pending_boundary_word.clear();
+        pending_boundary_vk = 0;
+        pending_boundary_owner = nullptr;
     }
 
     void on_key_down(DWORD vk, DWORD scan) {
@@ -326,6 +400,15 @@ struct Engine::Impl {
         }
 
         if (is_boundary(vk)) {
+            if (vk == VK_SPACE || vk == VK_RETURN || vk == VK_TAB) {
+                const HWND foreground = GetForegroundWindow();
+                if (!word.empty() && word_owner && word_owner == foreground) {
+                    pending_boundary_word = word;
+                    pending_boundary_vk = vk;
+                    pending_boundary_owner = word_owner;
+                    PostMessageW(message_window, kBoundaryMessage, 0, 0);
+                }
+            }
             clear_word();
             undo_available = false;
             return;
@@ -398,9 +481,6 @@ struct Engine::Impl {
             return;
         }
 
-        // Tab can move between two fields without a mouse click or a foreground-window change.
-        // Only accept focus events that belong to the active top-level window; background UIA
-        // traffic must not invalidate a word the user is currently typing elsewhere.
         if (event == EVENT_OBJECT_FOCUS && window) {
             const HWND root = GetAncestor(window, GA_ROOT);
             if (root && root == GetForegroundWindow()) instance->clear_all();
@@ -482,6 +562,94 @@ struct Engine::Impl {
         return true;
     }
 
+    void on_boundary_triggered() noexcept {
+        if (!enabled) return;
+        if (pending_boundary_word.empty()) return;
+
+        const HWND foreground = GetForegroundWindow();
+        if (!foreground || foreground != pending_boundary_owner || is_protected_foreground()) {
+            pending_boundary_word.clear();
+            pending_boundary_owner = nullptr;
+            return;
+        }
+
+        const std::vector<TypedKey> keys = std::move(pending_boundary_word);
+        const DWORD b_vk = pending_boundary_vk;
+        pending_boundary_word.clear();
+        pending_boundary_vk = 0;
+        pending_boundary_owner = nullptr;
+
+        const HKL source = current_layout();
+        const HKL target = target_layout(source);
+        if (!source || !target) return;
+
+        std::wstring typed;
+        if (!translate_keys(keys, keys.size(), source, typed) || typed.empty()) return;
+
+        std::wstring boundary_str;
+        if (b_vk == VK_RETURN) boundary_str = L"\r\n";
+        else if (b_vk == VK_TAB) boundary_str = L"\t";
+        else boundary_str = L" ";
+
+        // 1. TextFixes: Two initial capitals (e.g. "ПРивет" -> "Привет", "TWo" -> "Two")
+        if (settings && settings->fix_two_caps()) {
+            auto two_caps = fix_two_caps(typed, source, true);
+            if (two_caps && *two_caps != typed) {
+                if (replace_text(keys.size() + 1, *two_caps + boundary_str)) {
+                    screen_text = *two_caps + boundary_str;
+                    alternate_text = typed + boundary_str;
+                    screen_layout = source;
+                    alternate_layout = source;
+                    undo_available = true;
+                    return;
+                }
+            }
+        }
+
+        // 2. TextFixes: Misplaced dot/comma in numbers (e.g. "1ю8" -> "1.8", "5б2" -> "5,2")
+        if (settings && settings->fix_numbers()) {
+            auto num = fix_number(keys, typed, target);
+            if (num && *num != typed) {
+                if (replace_text(keys.size() + 1, *num + boundary_str)) {
+                    screen_text = *num + boundary_str;
+                    alternate_text = typed + boundary_str;
+                    screen_layout = source;
+                    alternate_layout = source;
+                    undo_available = true;
+                    return;
+                }
+            }
+        }
+
+        // 3. Layout Auto-Conversion (Space / Enter / Tab)
+        if (settings && settings->auto_convert()) {
+            std::wstring converted;
+            if (translate_keys(keys, keys.size(), target, converted) && !converted.empty() && converted != typed) {
+                bool caps = true;
+                for (const auto& k : keys) {
+                    if (!k.caps) { caps = false; break; }
+                }
+                if (should_auto_convert(typed, converted, source, target, caps)) {
+                    std::wstring final_converted = converted;
+                    if (settings->fix_two_caps()) {
+                        auto fixed_target = fix_two_caps(converted, target, true);
+                        if (fixed_target) final_converted = *fixed_target;
+                    }
+
+                    if (replace_text(keys.size() + 1, final_converted + boundary_str)) {
+                        switch_layout(target);
+                        screen_text = final_converted + boundary_str;
+                        alternate_text = typed + boundary_str;
+                        screen_layout = target;
+                        alternate_layout = source;
+                        undo_available = true;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     void convert_or_undo() noexcept {
         if (!enabled) return;
         if (is_protected_foreground()) {
@@ -553,6 +721,44 @@ struct Engine::Impl {
         convert_selection(true);
     }
 
+    void change_case() noexcept {
+        if (!enabled || is_protected_foreground()) return;
+
+        const HWND foreground = GetForegroundWindow();
+        if (!word.empty() && word_owner && word_owner == foreground) {
+            const HKL layout = current_layout();
+            std::wstring original;
+            if (translate_keys(word, word.size(), layout, original) && !original.empty()) {
+                std::wstring next = next_case(original);
+                if (next != original) {
+                    if (replace_text(word.size(), next)) {
+                        clear_all();
+                        return;
+                    }
+                }
+            }
+        }
+
+        ClipboardSnapshot clipboard;
+        if (!clipboard.capture()) return;
+
+        std::wstring selected;
+        if (!copy_current_selection(selected) || selected.empty()) {
+            clipboard.restore();
+            return;
+        }
+
+        std::wstring next = next_case(selected);
+        if (next == selected) {
+            clipboard.restore();
+            return;
+        }
+
+        if (!clipboard.restore()) return;
+        replace_text(0, next);
+        clear_all();
+    }
+
     ~Impl() {
         if (focus_hook) UnhookWinEvent(focus_hook);
         if (foreground_hook) UnhookWinEvent(foreground_hook);
@@ -564,11 +770,14 @@ struct Engine::Impl {
 
 Engine::Impl* Engine::Impl::instance = nullptr;
 
-Engine::Engine(HWND message_window) noexcept : impl_(new Impl(message_window)) {}
+Engine::Engine(HWND message_window, Settings* settings) noexcept
+    : impl_(new Impl(message_window, settings)) {}
 Engine::~Engine() { delete impl_; }
 bool Engine::install() noexcept { return impl_->install(); }
 void Engine::convert_or_undo() noexcept { impl_->convert_or_undo(); }
 void Engine::convert_line() noexcept { impl_->convert_line(); }
+void Engine::change_case() noexcept { impl_->change_case(); }
+void Engine::on_boundary_triggered() noexcept { impl_->on_boundary_triggered(); }
 void Engine::set_enabled(bool enabled) noexcept {
     impl_->enabled = enabled;
     if (!enabled) impl_->clear_all();

@@ -10,9 +10,13 @@ namespace {
 constexpr UINT kTrayMessage = WM_APP + 2;
 constexpr UINT kCommandEnabled = 100;
 constexpr UINT kCommandLine = 101;
-constexpr UINT kCommandAutostart = 102;
-constexpr UINT kCommandAbout = 103;
-constexpr UINT kCommandExit = 104;
+constexpr UINT kCommandChangeCase = 102;
+constexpr UINT kCommandFixTwoCaps = 103;
+constexpr UINT kCommandFixNumbers = 104;
+constexpr UINT kCommandAutoConvert = 105;
+constexpr UINT kCommandAutostart = 106;
+constexpr UINT kCommandAbout = 107;
+constexpr UINT kCommandExit = 108;
 constexpr UINT kFirstLayoutBase = 200;
 constexpr UINT kSecondLayoutBase = 300;
 constexpr UINT kIconId = 1;
@@ -67,7 +71,16 @@ struct Tray::Impl {
         if (!menu || !first || !second) return;
 
         AppendMenuW(menu, checked(engine.enabled()), kCommandEnabled, L"Enabled");
+        AppendMenuW(menu, checked(settings.auto_convert()), kCommandAutoConvert,
+                    L"Auto-convert on Space / Enter");
+        AppendMenuW(menu, checked(settings.fix_two_caps()), kCommandFixTwoCaps,
+                    L"Fix two caps (ПРивет \x2192 Привет)");
+        AppendMenuW(menu, checked(settings.fix_numbers()), kCommandFixNumbers,
+                    L"Fix numbers (1\x044e8 \x2192 1.8)");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
         AppendMenuW(menu, MF_STRING, kCommandLine, L"Convert current line");
+        AppendMenuW(menu, MF_STRING, kCommandChangeCase, L"Change case (lower / UPPER / Title)");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
         const auto& layouts = settings.layouts();
@@ -100,15 +113,29 @@ struct Tray::Impl {
             engine.set_enabled(value);
             settings.set_enabled(value);
             refresh();
+        } else if (id == kCommandAutoConvert) {
+            settings.set_auto_convert(!settings.auto_convert());
+        } else if (id == kCommandFixTwoCaps) {
+            settings.set_fix_two_caps(!settings.fix_two_caps());
+        } else if (id == kCommandFixNumbers) {
+            settings.set_fix_numbers(!settings.fix_numbers());
         } else if (id == kCommandLine) {
             engine.convert_line();
+        } else if (id == kCommandChangeCase) {
+            engine.change_case();
         } else if (id == kCommandAutostart) {
             settings.set_autostart(!settings.autostart_enabled());
         } else if (id == kCommandAbout) {
             MessageBoxW(nullptr,
-                        L"RuSwitcher native beta\n\nDouble-tap Ctrl: fix the last word or selected text.\n"
-                        L"Zero third-party runtime dependencies.",
-                        L"RuSwitcher", MB_OK | MB_ICONINFORMATION);
+                        L"RuSwitcher Native v0.10.0-beta.2\n\n"
+                        L"\x2022 Double-tap Ctrl: convert last word or selection (toggle back/forth).\n"
+                        L"\x2022 Word-end pipeline: Fix two caps (ПРивет \x2192 Привет) & numbers (1\x044e8 \x2192 1.8).\n"
+                        L"\x2022 Change case: lower \x2192 UPPER \x2192 Title Case cycle.\n"
+                        L"\x2022 Built-in dictionary & 154 tech / AI brand targets.\n"
+                        L"\x2022 Ultra-compact standalone Win32 binary (~190 KB).\n\n"
+                        L"Original macOS App: Rashid Sayfutdinov (@rashn)\n"
+                        L"Windows Native Port: @iLuckyStar",
+                        L"About RuSwitcher", MB_OK | MB_ICONINFORMATION);
         } else if (id == kCommandExit) {
             PostQuitMessage(0);
         } else if (id >= kFirstLayoutBase && id < kFirstLayoutBase + 90) {
@@ -158,4 +185,5 @@ bool Tray::handle(UINT message, WPARAM wparam, LPARAM lparam, LRESULT& result) n
     }
     return false;
 }
+
 }  // namespace ruswitcher

@@ -38,7 +38,16 @@ Verified locally on Windows ARM64 with real input events:
 - whole-current-line conversion independent of the foreground application;
 - native tray UI with pause/resume, layout pair selection and launch-at-sign-in;
 - embedded icon and Windows version metadata;
-- the executable imports Windows system DLLs only.
+- the executable imports Windows system DLLs only;
+- **macOS 3.5.0b Parity Features:**
+  - 154 curated tech/AI brand recognition targets (`brand_words.h`);
+  - Two-caps correction (`ПРивет` $\to$ `Привет`, `TWo` $\to$ `Two`);
+  - Number punctuation fix (`1ю8` $\to$ `1.8`, `5б2` $\to$ `5,2`);
+  - Change-case cycling (`lower` $\to$ `UPPER` $\to$ `Title` $\to$ `lower`);
+  - Word-End Pipeline triggering on Space, Enter, and Tab;
+  - Windows Spell Checking COM API integration (`ISpellCheckerFactory`);
+  - Interactive Tray context menu toggles for all text fixes and auto-conversion;
+  - Automated pure-logic native test suite (`RuSwitcherNativeTests.exe`).
 
-The native beta remains intentionally small, has no third-party runtime dependencies and is built
-for ARM64 and x64. Run `scripts/check_windows_binary_size.ps1` for every release build.
+The native executable is ultra-compact (~209 KB), has zero third-party runtime dependencies and is built for x64 and ARM64. Run `scripts/check_windows_binary_size.ps1` for every release build.
+

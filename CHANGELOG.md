@@ -28,6 +28,16 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
   - Added checkboxes for Two-Caps correction, Number punctuation correction, and Enter/Tab word-end pipeline.
   - Added Change-Case hotkey configuration in Settings.
   - Full localization in Russian and English.
+- **Ultra-Lightweight Native C++ Engine (`windows/native`, ~209 KB):**
+  - Full port of macOS 3.5.0b algorithmic capabilities into native C++20 Win32 executable:
+    - Zero-allocation binary search lookup for all 154 brand words (`brand_words.h`).
+    - Two-caps correction and number punctuation fix (`text_fixes.cpp`).
+    - Case cycling (`next_case`: lower $\to$ UPPER $\to$ Title Case).
+    - Asynchronous Word-End pipeline triggered on Space, Enter, and Tab.
+    - Defensive integration with Windows Spell Checking API (`ISpellCheckerFactory` in `dict.cpp`).
+    - Interactive Tray menu with live toggle controls for auto-convert, two-caps, and number fixes.
+    - Native pure-logic test suite (`RuSwitcherNativeTests.exe`).
+    - Binary size: only **209 KB** (123 KB zipped), statically compiled with `/MT` and `/O1 /Os /GL /LTCG` — zero runtime dependencies!
 - **Modern .NET Compatibility:**
   - Configured `<RollForward>LatestMajor</RollForward>` allowing out-of-the-box execution on .NET 8, .NET 9, and .NET 10 runtimes.
 

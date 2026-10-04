@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 project(RuSwitcherNative LANGUAGES CXX)
 
-set(RUSWITCHER_VERSION "0.10.0-beta.1" CACHE STRING "Display version embedded in RuSwitcher.exe")
-set(RUSWITCHER_VERSION_NUMERIC "0.10.0.1" CACHE STRING "Four-part numeric Windows version")
+set(RUSWITCHER_VERSION "0.10.0-beta.2" CACHE STRING "Display version embedded in RuSwitcher.exe")
+set(RUSWITCHER_VERSION_NUMERIC "0.10.0.2" CACHE STRING "Four-part numeric Windows version")
 
 if(NOT RUSWITCHER_VERSION_NUMERIC MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR "RUSWITCHER_VERSION_NUMERIC must contain four numeric components")
@@ -22,8 +22,10 @@ add_executable(RuSwitcherNative WIN32
     src/engine.cpp
     src/clipboard.cpp
     src/diagnostics.cpp
+    src/dict.cpp
     src/input_safety.cpp
     src/settings.cpp
+    src/text_fixes.cpp
     src/tray.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/resources.rc
 )
@@ -41,3 +43,23 @@ set_target_properties(RuSwitcherNative PROPERTIES
     OUTPUT_NAME RuSwitcher
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
+
+# Native Unit Tests
+enable_testing()
+add_executable(RuSwitcherNativeTests
+    tests/test_main.cpp
+    src/dict.cpp
+    src/text_fixes.cpp
+)
+target_compile_features(RuSwitcherNativeTests PRIVATE cxx_std_20)
+target_compile_definitions(RuSwitcherNativeTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(RuSwitcherNativeTests PRIVATE src)
+target_link_libraries(RuSwitcherNativeTests PRIVATE user32 ole32)
+if(MSVC)
+    target_compile_options(RuSwitcherNativeTests PRIVATE /utf-8 /permissive- /W4)
+    set_target_properties(RuSwitcherNativeTests PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+endif()
+
+add_test(NAME PureLogicTests COMMAND RuSwitcherNativeTests)

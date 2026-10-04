@@ -28,6 +28,18 @@ ULONG_PTR read_layout(HKEY key, const wchar_t* name) noexcept {
                : 0;
 }
 
+bool read_bool(HKEY key, const wchar_t* name, bool default_val) noexcept {
+    DWORD value = default_val ? 1 : 0;
+    DWORD type{};
+    DWORD size = sizeof(value);
+    if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size) ==
+            ERROR_SUCCESS &&
+        type == REG_DWORD) {
+        return value != 0;
+    }
+    return default_val;
+}
+
 HKL match_layout(ULONG_PTR saved, const std::vector<LayoutChoice>& layouts) noexcept {
     if (!saved) return nullptr;
     for (const auto& layout : layouts) {
@@ -66,13 +78,10 @@ Settings::Settings() noexcept {
     ULONG_PTR saved_first{};
     ULONG_PTR saved_second{};
     if (key) {
-        DWORD enabled_value = 1;
-        DWORD type{};
-        DWORD size = sizeof(enabled_value);
-        if (RegQueryValueExW(key, L"Enabled", nullptr, &type,
-                            reinterpret_cast<BYTE*>(&enabled_value), &size) == ERROR_SUCCESS &&
-            type == REG_DWORD)
-            enabled_ = enabled_value != 0;
+        enabled_ = read_bool(key, L"Enabled", true);
+        fix_two_caps_ = read_bool(key, L"FixTwoCaps", true);
+        fix_numbers_ = read_bool(key, L"FixNumbers", true);
+        auto_convert_ = read_bool(key, L"AutoConvert", false);
         saved_first = read_layout(key, L"FirstLayout");
         saved_second = read_layout(key, L"SecondLayout");
         RegCloseKey(key);
@@ -104,14 +113,32 @@ Settings::Settings() noexcept {
             }
 }
 
-void Settings::set_enabled(bool value) noexcept {
-    enabled_ = value;
+void Settings::save_bool(const wchar_t* name, bool value) noexcept {
     HKEY key = open_settings(KEY_SET_VALUE);
     if (!key) return;
     const DWORD stored = value ? 1 : 0;
-    RegSetValueExW(key, L"Enabled", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&stored),
-                   sizeof(stored));
+    RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&stored), sizeof(stored));
     RegCloseKey(key);
+}
+
+void Settings::set_enabled(bool value) noexcept {
+    enabled_ = value;
+    save_bool(L"Enabled", value);
+}
+
+void Settings::set_fix_two_caps(bool value) noexcept {
+    fix_two_caps_ = value;
+    save_bool(L"FixTwoCaps", value);
+}
+
+void Settings::set_fix_numbers(bool value) noexcept {
+    fix_numbers_ = value;
+    save_bool(L"FixNumbers", value);
+}
+
+void Settings::set_auto_convert(bool value) noexcept {
+    auto_convert_ = value;
+    save_bool(L"AutoConvert", value);
 }
 
 void Settings::save_layout(const wchar_t* name, HKL value) noexcept {
