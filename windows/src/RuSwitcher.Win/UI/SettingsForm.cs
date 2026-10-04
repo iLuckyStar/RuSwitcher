@@ -12,6 +12,8 @@ internal sealed class SettingsForm : Form
     public event Action<TriggerKind>? TriggerChanged;
     /// <summary>Raised when the layout-switch hotkey changes (so the running detector updates).</summary>
     public event Action? SwitchChanged;
+    /// <summary>Raised when the change-case hotkey changes.</summary>
+    public event Action? CaseChanged;
 
     public SettingsForm()
     {
@@ -28,12 +30,12 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(400, 360);
+        ClientSize = new Size(420, 500);
 
         int y = 16;
 
         var lblTrigger = new Label { Text = L10n.T("settings.trigger"), Left = 16, Top = y + 4, AutoSize = true };
-        var cmbTrigger = new ComboBox { Left = 150, Top = y, Width = 234, DropDownStyle = ComboBoxStyle.DropDownList };
+        var cmbTrigger = new ComboBox { Left = 160, Top = y, Width = 234, DropDownStyle = ComboBoxStyle.DropDownList };
         cmbTrigger.Items.AddRange(new object[]
         {
             Tray.TrayIcon.TriggerName(TriggerKind.CtrlDoubleTap),
@@ -55,6 +57,12 @@ internal sealed class SettingsForm : Form
             v => { s.SmartConversion = v; s.Save(); });
         var chkAuto = MakeCheck(L10n.T("settings.auto"), ref y, s.AutoConvert,
             v => { s.AutoConvert = v; s.Save(); });
+        var chkTwoCaps = MakeCheck(L10n.T("settings.twocaps"), ref y, s.FixTwoCaps,
+            v => { s.FixTwoCaps = v; s.Save(); });
+        var chkNumbers = MakeCheck(L10n.T("settings.numbers"), ref y, s.FixNumbers,
+            v => { s.FixNumbers = v; s.Save(); });
+        var chkWordEnd = MakeCheck(L10n.T("settings.wordend"), ref y, s.WordEndEnterTab,
+            v => { s.WordEndEnterTab = v; s.Save(); });
         var chkSound = MakeCheck(L10n.T("settings.sound"), ref y, s.SoundOnSwitch,
             v => { s.SoundOnSwitch = v; s.Save(); });
         var chkStart = MakeCheck(L10n.T("settings.startup"), ref y, AutoStart.IsEnabled(),
@@ -66,7 +74,7 @@ internal sealed class SettingsForm : Form
 
         y += 6;
         var lblSwitch = new Label { Text = L10n.T("settings.switchhotkey"), Left = 16, Top = y + 4, AutoSize = true };
-        var cmbSwitch = new ComboBox { Left = 180, Top = y, Width = 204, DropDownStyle = ComboBoxStyle.DropDownList };
+        var cmbSwitch = new ComboBox { Left = 180, Top = y, Width = 214, DropDownStyle = ComboBoxStyle.DropDownList };
         cmbSwitch.Items.AddRange(new object[]
         {
             L10n.T("settings.off"),
@@ -83,6 +91,26 @@ internal sealed class SettingsForm : Form
             s.Save();
             SwitchChanged?.Invoke();
         };
+        y += 34;
+
+        var lblCase = new Label { Text = L10n.T("settings.casehotkey"), Left = 16, Top = y + 4, AutoSize = true };
+        var cmbCase = new ComboBox { Left = 240, Top = y, Width = 154, DropDownStyle = ComboBoxStyle.DropDownList };
+        cmbCase.Items.AddRange(new object[]
+        {
+            L10n.T("settings.off"),
+            Tray.TrayIcon.TriggerName(TriggerKind.PauseBreak),
+            Tray.TrayIcon.TriggerName(TriggerKind.ShiftDoubleTap),
+            Tray.TrayIcon.TriggerName(TriggerKind.CtrlDoubleTap),
+        });
+        cmbCase.SelectedIndex = s.ChangeCaseEnabled ? (int)s.ChangeCaseTrigger + 1 : 0;
+        cmbCase.SelectedIndexChanged += (_, _) =>
+        {
+            int i = cmbCase.SelectedIndex;
+            s.ChangeCaseEnabled = i > 0;
+            if (i > 0) s.ChangeCaseTrigger = (TriggerKind)(i - 1);
+            s.Save();
+            CaseChanged?.Invoke();
+        };
         y += 40;
 
         var btnExceptions = new Button { Text = L10n.T("settings.exceptions"), Left = 16, Top = y, Width = 130 };
@@ -92,20 +120,21 @@ internal sealed class SettingsForm : Form
         link.LinkClicked += (_, _) => OpenUrl("https://github.com/rashn/RuSwitcher");
         y += 40;
 
-        var btnClose = new Button { Text = L10n.T("settings.close"), Left = 294, Top = y, Width = 90, DialogResult = DialogResult.OK };
+        var btnClose = new Button { Text = L10n.T("settings.close"), Left = 304, Top = y, Width = 90, DialogResult = DialogResult.OK };
         AcceptButton = btnClose;
-        ClientSize = new Size(400, y + 40);
+        ClientSize = new Size(420, y + 40);
 
         Controls.AddRange(new Control[]
         {
-            lblTrigger, cmbTrigger, chkWhole, chkSmart, chkAuto, chkSound, chkStart, chkPerApp,
-            chkUpdates, lblSwitch, cmbSwitch, btnExceptions, link, btnClose,
+            lblTrigger, cmbTrigger, chkWhole, chkSmart, chkAuto, chkTwoCaps, chkNumbers, chkWordEnd,
+            chkSound, chkStart, chkPerApp, chkUpdates, lblSwitch, cmbSwitch, lblCase, cmbCase,
+            btnExceptions, link, btnClose,
         });
     }
 
     private CheckBox MakeCheck(string text, ref int top, bool value, Action<bool> onChange)
     {
-        var cb = new CheckBox { Text = text, Left = 16, Top = top, Width = 368, Checked = value };
+        var cb = new CheckBox { Text = text, Left = 16, Top = top, Width = 388, Checked = value };
         cb.CheckedChanged += (_, _) => onChange(cb.Checked);
         top += 26;
         return cb;

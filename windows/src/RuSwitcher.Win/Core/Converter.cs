@@ -227,6 +227,86 @@ internal static class Converter
         return true;
     }
 
+    /// <summary>
+    /// Cycle the case of the last word or current selection (issue #29, macOS 3.3+ parity):
+    /// lowercase -> UPPERCASE -> Title Case -> lowercase.
+    /// </summary>
+    public static bool ChangeCase(KeystrokeBuffer buffer)
+    {
+        LastDiagnostic = "";
+        if (!buffer.IsEmpty)
+        {
+            var keys = buffer.CurrentWord;
+            IntPtr currentHkl = LayoutSwitcher.Current();
+            string original = KeyMapper.ConvertWord(keys, currentHkl);
+            if (string.IsNullOrEmpty(original) || !original.Any(char.IsLetter)) return false;
+
+            string next = NextCase(original);
+            if (next == original) return false;
+
+            if (!TextInjector.Replace(backspaces: original.Length, text: next))
+            {
+                LastDiagnostic = TextInjector.LastDiagnostic;
+                return false;
+            }
+            ClearReconvert();
+            buffer.Reset();
+            return true;
+        }
+
+        return ChangeCaseSelection();
+    }
+
+    private static bool ChangeCaseSelection()
+    {
+        var clipboard = ClipboardSnapshot.Capture();
+        if (!ClipboardSnapshot.TryCopySelection(out string sel, out string copyDiagnostic))
+        {
+            clipboard.Restore();
+            LastDiagnostic = copyDiagnostic;
+            return false;
+        }
+
+        string next = NextCase(sel);
+        if (next == sel)
+        {
+            clipboard.Restore();
+            LastDiagnostic = "case change is a no-op";
+            return false;
+        }
+
+        if (!clipboard.Restore())
+        {
+            LastDiagnostic = "could not restore clipboard";
+            return false;
+        }
+
+        if (!TextInjector.Replace(backspaces: 0, text: next))
+        {
+            LastDiagnostic = TextInjector.LastDiagnostic;
+            return false;
+        }
+
+        ClearReconvert();
+        return true;
+    }
+
+    /// <summary>
+    /// Next case in cycle: lower -> UPPER -> Title -> lower.
+    /// </summary>
+    public static string NextCase(string s)
+    {
+        var letters = s.Where(char.IsLetter).ToList();
+        if (letters.Count == 0) return s;
+
+        if (letters.All(char.IsLower)) return s.ToUpperInvariant();
+        if (letters.All(char.IsUpper))
+        {
+            return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(s.ToLowerInvariant());
+        }
+        return s.ToLowerInvariant();
+    }
+
     // Trim non-letters off both ends and lowercase — the key used for the never-convert exception list.
     private static string LetterCoreLower(string s)
     {

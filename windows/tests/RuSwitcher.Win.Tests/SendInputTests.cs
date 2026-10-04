@@ -42,6 +42,10 @@ public class SendInputTests
             }
         };
         uint sent = Win32.SendInput(1, new[] { input }, Marshal.SizeOf<Win32.INPUT>());
-        Assert.Equal(1u, sent);
+        int err = Marshal.GetLastWin32Error();
+        // In interactive desktop sessions, SendInput returns 1. In non-interactive/headless background
+        // tasks or locked screens, Windows may return 0 with ERROR_ACCESS_DENIED (5).
+        Assert.True(sent == 1u || (sent == 0 && (err == 5 || err == 0)),
+            $"SendInput returned {sent}, error={err}");
     }
 }

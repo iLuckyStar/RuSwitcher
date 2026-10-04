@@ -1,13 +1,19 @@
 # RuSwitcher for Windows
 
-**Status: 0.9.2 beta 4.** A tray application built on the same philosophy as the macOS original —
-zero external dependencies, no telemetry, local dictionaries, keycode-based conversion.
+> **Original author:** Rashid Sayfutdinov ([@rashn](https://github.com/rashn)) | [ruswitcher.app](https://ruswitcher.app)  
+> **Windows port & macOS 3.5.0b parity update:** [@iLuckyStar](https://github.com/iLuckyStar) | [Changelog](file:///C:/Users/Bear/.gemini/antigravity/scratch/RuSwitcher/CHANGELOG.md)
 
-## Features (parity with the macOS version)
+**Status: 0.10.0-beta.2 (macOS 3.5.0b feature parity).** A tray application built on the same philosophy as the macOS original — zero external dependencies, no telemetry, local dictionaries, keycode-based conversion.
+
+## Features (parity with macOS 3.5.0b)
 
 - **Manual trigger** — double-tap Ctrl (default), double-tap Shift, or the Pause/Break key.
   Converts the last typed word, the current selection, or the whole line into the other layout,
   and switches the keyboard. Trigger it again with nothing typed since to reverse (toggle).
+- **Change-case hotkey** (issue #29, macOS 3.3.0 parity) — cycle `lower` → `UPPER` → `Title` on the last word or selection.
+- **Word-end pipeline** (macOS 3.5.0b parity) — triggers on Space, Enter, and Tab.
+- **Text fixes** (macOS 3.5.0b parity) — fixes two initial capitals (`ПРивет` → `Привет`, `TWo` → `Two`) and numbers with misplaced separators (`1ю8` → `1.8`).
+- **Brand & IT term recognition** (issue #34) — built-in dictionary of 154 AI/tech brands (`chatgpt`, `docker`, `github`, `kubernetes`, `vscode`, etc.).
 - **Whole-line conversion** (issue #24) — convert the entire current line, not just the last word,
   including a keyboard-buffer fallback for Windows Terminal and other console hosts.
 - **Smart selection conversion** (issue #22) — keeps words that are already correct, flips only the

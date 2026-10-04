@@ -38,6 +38,19 @@ public sealed class Settings
     /// trigger teaches an exception (learn-from-undo).</summary>
     public bool AutoConvert { get; set; } = false;
 
+    /// <summary>macOS 3.5.0b parity: trigger word-end pipeline also on Enter and Tab.</summary>
+    public bool WordEndEnterTab { get; set; } = true;
+
+    /// <summary>macOS 3.5.0b parity: fix two initial caps (e.g. "ПРивет" -> "Привет").</summary>
+    public bool FixTwoCaps { get; set; } = true;
+
+    /// <summary>macOS 3.5.0b parity: fix digits with punctuation in opposite layout (e.g. "1ю8" -> "1.8").</summary>
+    public bool FixNumbers { get; set; } = true;
+
+    /// <summary>macOS 3.3.0 parity (issue #29): Change-case hotkey (cycles lower -> UPPER -> Title).</summary>
+    public bool ChangeCaseEnabled { get; set; } = false;
+    public TriggerKind ChangeCaseTrigger { get; set; } = TriggerKind.PauseBreak;
+
     /// <summary>Words never auto-converted (typed form, lowercase). Grown by learn-from-undo.</summary>
     public List<string> NeverConvert { get; set; } = new();
 

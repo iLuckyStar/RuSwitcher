@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
     <!-- Lets the test project compile on non-Windows (CI on windows-latest still runs it). -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
   <ItemGroup>

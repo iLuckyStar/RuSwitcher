@@ -85,6 +85,16 @@ internal static class Program
             }
         };
 
+        // issue #29: change-case hotkey (cycles lower -> UPPER -> Title)
+        var caseDetector = new TriggerDetector(settings.ChangeCaseTrigger);
+        caseDetector.Triggered += () =>
+        {
+            if (enabled && settings.ChangeCaseEnabled)
+            {
+                Converter.ChangeCase(buffer);
+            }
+        };
+
         tray.TriggerActivated += () =>
         {
             if (!enabled) return;
@@ -116,15 +126,15 @@ internal static class Program
             Log($"trigger: action={action}, acted={acted}, app={app}, wordKeys={wordKeys}, lineKeys={lineKeys}" +
                 (acted ? "" : $", reason={Converter.LastDiagnostic}"));
         };
-        tray.AutoConvertActivated += () =>
+        tray.AutoConvertActivated += boundaryVk =>
         {
-            // Deferred off the hook callback: the real Space has already landed, so TryConvertWord
-            // deletes the word + that space and re-types the converted word + space (or keeps it).
+            // Deferred off the hook callback: the real boundary key has landed, so TryConvertWord
+            // runs the word-end pipeline (two-caps, numbers, auto-convert layout swap).
             if (pendingAuto is { } w)
             {
-                AutoConverter.TryConvertWord(w);
+                AutoConverter.TryConvertWord(w, boundaryVk);
                 pendingAuto = null;
-                buffer.Reset(); // auto retyped text no longer matches the captured physical line
+                buffer.Reset();
             }
         };
         tray.EnabledChanged += on => { enabled = on; Log($"enabled = {on}"); };
@@ -134,6 +144,7 @@ internal static class Program
             using var form = new UI.SettingsForm();
             form.TriggerChanged += kind => detector.Kind = kind;
             form.SwitchChanged += () => switchDetector.Kind = settings.SwitchTrigger;
+            form.CaseChanged += () => caseDetector.Kind = settings.ChangeCaseTrigger;
             form.ShowDialog();   // modal; the message loop keeps pumping the hook + tray
         };
         tray.QuitRequested += () => Log("quit requested");
@@ -153,6 +164,7 @@ internal static class Program
 
             detector.OnKeyDown(vk);
             switchDetector.OnKeyDown(vk);
+            caseDetector.OnKeyDown(vk);
 
             if (vk == KeystrokeBuffer.VK_BACK)
             {
@@ -167,15 +179,17 @@ internal static class Program
 
             if (KeystrokeBuffer.IsWordBoundary(vk))
             {
-                // As-you-type auto conversion (beta): on Space, arm a deferred check. We snapshot the
-                // word and post to the message loop — the dictionary check + retype must NOT run inside
-                // this LL-hook callback (COM/SendInput there risks the LowLevelHooksTimeout → unhook).
-                // We do NOT swallow the space; the deferred handler deletes the word + delivered space.
-                if (vk == KeystrokeBuffer.VK_SPACE && settings.AutoConvert && !buffer.IsEmpty)
+                // Word-end pipeline (macOS 3.5.0b parity): on Space, Enter, or Tab, arm a deferred check.
+                bool isEligible = vk == KeystrokeBuffer.VK_SPACE
+                    || (settings.WordEndEnterTab && (vk == KeystrokeBuffer.VK_RETURN || vk == KeystrokeBuffer.VK_TAB));
+                bool pipelineEnabled = settings.AutoConvert || settings.FixTwoCaps || settings.FixNumbers;
+
+                if (isEligible && pipelineEnabled && !buffer.IsEmpty)
                 {
                     pendingAuto = new List<TypedKey>(buffer.CurrentWord);
-                    tray.PostAutoConvert();
+                    tray.PostAutoConvert(vk);
                 }
+
                 if (vk == KeystrokeBuffer.VK_SPACE)
                 {
                     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -210,6 +224,7 @@ internal static class Program
             if (!enabled) return;
             detector.OnKeyUp(vk);
             switchDetector.OnKeyUp(vk);
+            caseDetector.OnKeyUp(vk);
         };
         hook.Install();
 

@@ -35,7 +35,7 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>Fired on the message-loop thread when a trigger was posted from the hook.</summary>
     public event Action? TriggerActivated;
     /// <summary>Fired on the message-loop thread when an as-you-type auto-convert was posted from the hook.</summary>
-    public event Action? AutoConvertActivated;
+    public event Action<uint>? AutoConvertActivated;
 
     public TrayIcon() => _wndProc = WindowProc;
 
@@ -49,9 +49,9 @@ internal sealed class TrayIcon : IDisposable
 
     /// <summary>Called from the LL hook callback on a word boundary when auto-convert is armed: posts a
     /// message so the dictionary check + retype run on the message loop, never inside the callback.</summary>
-    public void PostAutoConvert()
+    public void PostAutoConvert(uint boundaryVk = KeystrokeBuffer.VK_SPACE)
     {
-        if (_hwnd != IntPtr.Zero) PostMessageW(_hwnd, WM_AUTOCONVERT, IntPtr.Zero, IntPtr.Zero);
+        if (_hwnd != IntPtr.Zero) PostMessageW(_hwnd, WM_AUTOCONVERT, (IntPtr)boundaryVk, IntPtr.Zero);
     }
 
     public void Show(string tooltip)
@@ -124,7 +124,7 @@ internal sealed class TrayIcon : IDisposable
                 return IntPtr.Zero;
 
             case WM_AUTOCONVERT:
-                AutoConvertActivated?.Invoke();
+                AutoConvertActivated?.Invoke((uint)(wParam.ToInt64() & 0xFFFFFFFF));
                 return IntPtr.Zero;
 
             case WM_COMMAND:

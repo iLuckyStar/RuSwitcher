@@ -1,6 +1,6 @@
 {
-  "version": "0.9.2-beta.4",
-  "url": "https://github.com/rashn/RuSwitcher/releases/tag/win-v0.9.2-beta.4",
-  "notes": "Universal Windows routing: conversion mechanisms are selected from typed-buffer and selection state, never from application names.",
+  "version": "0.10.0-beta.2",
+  "url": "https://github.com/iLuckyStar/RuSwitcher/releases/tag/win-v0.10.0-beta.2",
+  "notes": "Parity with macOS 3.5.0b: Word-end pipeline on Space/Enter/Tab, two-caps correction (ПРивет -> Привет), number separator fixes (1ю8 -> 1.8), built-in IT and tech brands dictionary (#34), Change-Case hotkey (#29).",
   "sha256": ""
 }
