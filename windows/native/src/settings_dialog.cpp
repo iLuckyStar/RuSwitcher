@@ -13,15 +13,15 @@ namespace {
 constexpr int IDC_COMBO_TRIGGER = 1001;
 constexpr int IDC_COMBO_SWITCH = 1002;
 constexpr int IDC_COMBO_CASE = 1003;
-constexpr int IDC_COMBO_FIRST = 1004;
-constexpr int IDC_COMBO_SECOND = 1005;
+constexpr int IDC_COMBO_SCOPE = 1004;
+constexpr int IDC_COMBO_FIRST = 1005;
+constexpr int IDC_COMBO_SECOND = 1006;
 
 constexpr int IDC_CHK_AUTOCONVERT = 1010;
 constexpr int IDC_CHK_TWOCAPS = 1011;
 constexpr int IDC_CHK_NUMBERS = 1012;
-constexpr int IDC_CHK_WHOLELINE = 1013;
-constexpr int IDC_CHK_SOUND = 1014;
-constexpr int IDC_CHK_AUTOSTART = 1015;
+constexpr int IDC_CHK_SOUND = 1013;
+constexpr int IDC_CHK_AUTOSTART = 1014;
 
 constexpr int IDC_BTN_OK = 1020;
 constexpr int IDC_BTN_CANCEL = 1021;
@@ -33,12 +33,12 @@ struct DialogContext {
     HWND cb_trigger{};
     HWND cb_switch{};
     HWND cb_case{};
+    HWND cb_scope{};
     HWND cb_first{};
     HWND cb_second{};
     HWND chk_autoconvert{};
     HWND chk_twocaps{};
     HWND chk_numbers{};
-    HWND chk_wholeline{};
     HWND chk_sound{};
     HWND chk_autostart{};
     HFONT font{};
@@ -118,6 +118,13 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             SendMessageW(ctx->cb_case, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Двойной Alt"));
             SendMessageW(ctx->cb_case, CB_SETCURSEL, static_cast<WPARAM>(ctx->settings.case_hotkey()), 0);
 
+            y += 36;
+            create_label(hwnd, inst, L"Область конвертации:", 16, y + 4, 210, 20, font);
+            ctx->cb_scope = create_combo(hwnd, inst, IDC_COMBO_SCOPE, 230, y, 200, 200, font);
+            SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Последнее слово / выделение"));
+            SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся строка целиком (Shift+Home)"));
+            SendMessageW(ctx->cb_scope, CB_SETCURSEL, ctx->settings.convert_whole_line() ? 1 : 0, 0);
+
             y += 42;
             ctx->chk_autoconvert = create_checkbox(hwnd, inst, IDC_CHK_AUTOCONVERT,
                 L"Авто-конвертация на лету (по Space, Enter, Tab)", 16, y, 420, 22, font);
@@ -132,11 +139,6 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             ctx->chk_numbers = create_checkbox(hwnd, inst, IDC_CHK_NUMBERS,
                 L"Исправлять опечатки в цифрах (1ю8 → 1.8, 5б2 → 5,2)", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_numbers, BM_SETCHECK, ctx->settings.fix_numbers() ? BST_CHECKED : BST_UNCHECKED, 0);
-
-            y += 28;
-            ctx->chk_wholeline = create_checkbox(hwnd, inst, IDC_CHK_WHOLELINE,
-                L"Конвертировать всю текущую строку (Shift+Home)", 16, y, 420, 22, font);
-            SendMessageW(ctx->chk_wholeline, BM_SETCHECK, ctx->settings.convert_whole_line() ? BST_CHECKED : BST_UNCHECKED, 0);
 
             y += 28;
             ctx->chk_sound = create_checkbox(hwnd, inst, IDC_CHK_SOUND,
@@ -191,7 +193,8 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                     ctx->settings.set_auto_convert(SendMessageW(ctx->chk_autoconvert, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_fix_two_caps(SendMessageW(ctx->chk_twocaps, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_fix_numbers(SendMessageW(ctx->chk_numbers, BM_GETCHECK, 0, 0) == BST_CHECKED);
-                    ctx->settings.set_convert_whole_line(SendMessageW(ctx->chk_wholeline, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    int sc_sel = static_cast<int>(SendMessageW(ctx->cb_scope, CB_GETCURSEL, 0, 0));
+                    if (sc_sel >= 0) ctx->settings.set_convert_whole_line(sc_sel == 1);
                     ctx->settings.set_sound_on_switch(SendMessageW(ctx->chk_sound, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_autostart(SendMessageW(ctx->chk_autostart, BM_GETCHECK, 0, 0) == BST_CHECKED);
 

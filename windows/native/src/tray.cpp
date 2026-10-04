@@ -22,6 +22,8 @@ constexpr UINT kCommandAutostart = 108;
 constexpr UINT kCommandSettings = 109;
 constexpr UINT kCommandAbout = 110;
 constexpr UINT kCommandExit = 111;
+constexpr UINT kCommandScopeWord = 112;
+constexpr UINT kCommandScopeLine = 113;
 
 constexpr UINT kTriggerBase = 200;      // 200..204
 constexpr UINT kSwitchBase = 210;       // 210..215
@@ -89,12 +91,13 @@ struct Tray::Impl {
     void show_menu() noexcept {
         engine.remember_foreground();
         const HMENU menu = CreatePopupMenu();
+        const HMENU scope_menu = CreatePopupMenu();
         const HMENU trigger_menu = CreatePopupMenu();
         const HMENU switch_menu = CreatePopupMenu();
         const HMENU case_menu = CreatePopupMenu();
         const HMENU first_menu = CreatePopupMenu();
         const HMENU second_menu = CreatePopupMenu();
-        if (!menu || !trigger_menu || !switch_menu || !case_menu || !first_menu || !second_menu) return;
+        if (!menu || !scope_menu || !trigger_menu || !switch_menu || !case_menu || !first_menu || !second_menu) return;
 
         // Current layout indicator
         std::wstring indicator = L"⌨  Раскладка: " + current_layout_display_name();
@@ -103,6 +106,13 @@ struct Tray::Impl {
 
         AppendMenuW(menu, checked(engine.enabled()), kCommandEnabled, L"Включено");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+        // Scope submenu (Whole line vs Word / Selection)
+        AppendMenuW(scope_menu, checked(!settings.convert_whole_line()),
+                    kCommandScopeWord, L"Последнее слово / выделенный текст (стандартно)");
+        AppendMenuW(scope_menu, checked(settings.convert_whole_line()),
+                    kCommandScopeLine, L"Вся строка целиком (Shift+Home)");
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(scope_menu), L"Область конвертации");
 
         // Trigger submenu (conversion hotkey)
         for (int i = 0; i <= 4; ++i) {
@@ -135,8 +145,6 @@ struct Tray::Impl {
                     L"Исправлять две заглавные (ПРивет → Привет)");
         AppendMenuW(menu, checked(settings.fix_numbers()), kCommandFixNumbers,
                     L"Исправлять опечатки в цифрах (1ю8 → 1.8)");
-        AppendMenuW(menu, checked(settings.convert_whole_line()), kCommandWholeLine,
-                    L"Конвертировать всю строку целиком");
         AppendMenuW(menu, checked(settings.sound_on_switch()), kCommandSound,
                     L"Звук при переключении раскладки");
 
@@ -188,8 +196,10 @@ struct Tray::Impl {
             settings.set_fix_two_caps(!settings.fix_two_caps());
         } else if (id == kCommandFixNumbers) {
             settings.set_fix_numbers(!settings.fix_numbers());
-        } else if (id == kCommandWholeLine) {
-            settings.set_convert_whole_line(!settings.convert_whole_line());
+        } else if (id == kCommandScopeWord) {
+            settings.set_convert_whole_line(false);
+        } else if (id == kCommandScopeLine) {
+            settings.set_convert_whole_line(true);
         } else if (id == kCommandSound) {
             settings.set_sound_on_switch(!settings.sound_on_switch());
         } else if (id == kCommandLine) {

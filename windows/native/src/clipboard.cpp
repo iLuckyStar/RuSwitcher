@@ -222,7 +222,7 @@ bool send_copy_chord() noexcept {
 }
 
 void wait_for_modifiers_released() noexcept {
-    const ULONGLONG deadline = GetTickCount64() + 300;
+    const ULONGLONG deadline = GetTickCount64() + 150;
     while (GetTickCount64() < deadline) {
         const bool down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
                           (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
@@ -232,7 +232,7 @@ void wait_for_modifiers_released() noexcept {
         if (!down) break;
         Sleep(5);
     }
-    Sleep(25);
+    Sleep(10);
 }
 
 bool read_unicode_text(std::wstring& text) noexcept {
@@ -255,7 +255,7 @@ bool wait_for_text(DWORD initial_sequence, DWORD timeout_ms, std::wstring& text)
     const ULONGLONG deadline = GetTickCount64() + timeout_ms;
     while (GetTickCount64() < deadline) {
         if (GetClipboardSequenceNumber() != initial_sequence && read_unicode_text(text)) return true;
-        Sleep(15);
+        Sleep(10);
     }
     return false;
 }
@@ -269,7 +269,7 @@ bool send_native_copy() noexcept {
     if (!focused) return false;
     DWORD_PTR ignored{};
     return SendMessageTimeoutW(focused, WM_COPY, 0, 0,
-                               SMTO_ABORTIFHUNG | SMTO_BLOCK, 150, &ignored) != 0;
+                               SMTO_ABORTIFHUNG | SMTO_BLOCK, 100, &ignored) != 0;
 }
 
 }  // namespace
@@ -338,14 +338,14 @@ bool copy_current_selection(std::wstring& text) noexcept {
     text.clear();
     wait_for_modifiers_released();
     DWORD sequence = GetClipboardSequenceNumber();
-    if (send_native_copy() && wait_for_text(sequence, 250, text)) return true;
+    if (send_native_copy() && wait_for_text(sequence, 120, text)) return true;
 
     // Custom/Chromium/terminal controls often expose no useful focused HWND. Fall back to the
     // same user-level copy command in every app, still without executable-name routing.
     if (!clear_clipboard()) return false;
     sequence = GetClipboardSequenceNumber();
     if (!send_copy_chord()) return false;
-    return wait_for_text(sequence, 650, text);
+    return wait_for_text(sequence, 180, text);
 }
 
 }  // namespace ruswitcher

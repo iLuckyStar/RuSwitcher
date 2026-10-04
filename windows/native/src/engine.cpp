@@ -85,6 +85,49 @@ bool useful_foreground(HWND window, HWND own_window) noexcept {
            lstrcmpW(class_name, L"#32768") != 0;
 }
 
+void restore_target_focus(HWND target) noexcept {
+    if (!target || !IsWindow(target)) return;
+
+    HWND root = GetAncestor(target, GA_ROOT);
+    if (!root) root = target;
+
+    const HWND current_fore = GetForegroundWindow();
+    if (current_fore == root || current_fore == target) return;
+
+    const DWORD current_tid = GetCurrentThreadId();
+    const DWORD target_tid = GetWindowThreadProcessId(root, nullptr);
+    const DWORD fore_tid = current_fore ? GetWindowThreadProcessId(current_fore, nullptr) : 0;
+
+    if (fore_tid && fore_tid != current_tid) {
+        AttachThreadInput(current_tid, fore_tid, TRUE);
+    }
+    if (target_tid && target_tid != current_tid) {
+        AttachThreadInput(current_tid, target_tid, TRUE);
+    }
+
+    if (IsIconic(root)) {
+        ShowWindow(root, SW_RESTORE);
+    }
+
+    BringWindowToTop(root);
+    SetForegroundWindow(root);
+    SetFocus(target);
+
+    if (fore_tid && fore_tid != current_tid) {
+        AttachThreadInput(current_tid, fore_tid, FALSE);
+    }
+    if (target_tid && target_tid != current_tid) {
+        AttachThreadInput(current_tid, target_tid, FALSE);
+    }
+
+    for (int i = 0; i < 20; ++i) {
+        HWND active = GetForegroundWindow();
+        if (active == root || active == target) break;
+        Sleep(10);
+    }
+    Sleep(40);
+}
+
 HKL current_layout() noexcept {
     const HWND foreground = GetForegroundWindow();
     const DWORD thread = GetWindowThreadProcessId(foreground, nullptr);
@@ -206,14 +249,35 @@ INPUT key_input(WORD vk, WORD scan, DWORD flags) noexcept {
 }
 
 bool send_line_selection() noexcept {
-    INPUT inputs[]{key_input(VK_HOME, 0, 0),
-                   key_input(VK_HOME, 0, KEYEVENTF_KEYUP),
+    INPUT to_start[]{key_input(VK_HOME, 0, 0), key_input(VK_HOME, 0, KEYEVENTF_KEYUP)};
+    SendInput(static_cast<UINT>(std::size(to_start)), to_start, sizeof(INPUT));
+    Sleep(25);
+
+    INPUT select_to_end[]{key_input(VK_SHIFT, 0, 0),
+                          key_input(VK_END, 0, 0),
+                          key_input(VK_END, 0, KEYEVENTF_KEYUP),
+                          key_input(VK_SHIFT, 0, KEYEVENTF_KEYUP)};
+    return SendInput(static_cast<UINT>(std::size(select_to_end)), select_to_end, sizeof(INPUT)) ==
+           std::size(select_to_end);
+}
+
+bool send_word_selection(bool to_left) noexcept {
+    const WORD dir = to_left ? VK_LEFT : VK_RIGHT;
+    INPUT inputs[]{key_input(VK_CONTROL, 0, 0),
                    key_input(VK_SHIFT, 0, 0),
-                   key_input(VK_END, 0, 0),
-                   key_input(VK_END, 0, KEYEVENTF_KEYUP),
-                   key_input(VK_SHIFT, 0, KEYEVENTF_KEYUP)};
+                   key_input(dir, 0, 0),
+                   key_input(dir, 0, KEYEVENTF_KEYUP),
+                   key_input(VK_SHIFT, 0, KEYEVENTF_KEYUP),
+                   key_input(VK_CONTROL, 0, KEYEVENTF_KEYUP)};
     return SendInput(static_cast<UINT>(std::size(inputs)), inputs, sizeof(INPUT)) ==
            std::size(inputs);
+}
+
+bool has_letter(std::wstring_view text) noexcept {
+    for (wchar_t c : text) {
+        if (iswalpha(c)) return true;
+    }
+    return false;
 }
 
 bool replace_text(std::size_t characters_to_delete, const std::wstring& replacement) {
@@ -504,6 +568,7 @@ struct Engine::Impl {
                 return;
             }
             const HWND foreground = GetForegroundWindow();
+            if (useful_foreground(foreground, message_window)) last_foreground = foreground;
             if (word_owner && foreground != word_owner) clear_word();
             if (word.empty()) {
                 word_owner = foreground;
@@ -623,6 +688,9 @@ struct Engine::Impl {
         if (code == HC_ACTION && instance &&
             (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ||
              message == WM_MBUTTONDOWN)) {
+            const HWND fg = GetForegroundWindow();
+            if (useful_foreground(fg, instance->message_window))
+                instance->last_foreground = fg;
             instance->clear_all();
         }
         return CallNextHookEx(instance ? instance->mouse_hook : nullptr, code, message, data);
@@ -688,14 +756,21 @@ struct Engine::Impl {
             return false;
         }
         std::wstring selected;
-        if (!copy_current_selection(selected)) {
+        if (!copy_current_selection(selected) || selected.empty()) {
             clipboard.restore();
             return false;
         }
         std::wstring converted = convert_text(selected, source, target);
+        HKL final_target = target;
         if (converted == selected) {
-            clipboard.restore();
-            return false;
+            std::wstring reverse_converted = convert_text(selected, target, source);
+            if (reverse_converted != selected) {
+                converted = std::move(reverse_converted);
+                final_target = source;
+            } else {
+                clipboard.restore();
+                return false;
+            }
         }
         if (!clipboard.restore()) {
             return false;
@@ -703,13 +778,13 @@ struct Engine::Impl {
         if (!replace_text(0, converted)) {
             return false;
         }
-        switch_layout(target);
+        switch_layout(final_target);
 
         if (permit_undo) {
             screen_text = std::move(converted);
             alternate_text = std::move(selected);
-            screen_layout = target;
-            alternate_layout = source;
+            screen_layout = final_target;
+            alternate_layout = (final_target == target) ? source : target;
             undo_available = true;
         }
         return true;
@@ -938,19 +1013,33 @@ struct Engine::Impl {
     }
 
     void convert_line() noexcept {
-        if (!enabled || is_protected_foreground()) return;
-        clear_all();
+        if (!enabled) return;
         if (last_foreground && IsWindow(last_foreground)) {
-            SetForegroundWindow(last_foreground);
-            Sleep(80);
+            restore_target_focus(last_foreground);
         }
+        if (is_protected_foreground()) return;
+        clear_all();
+
+        // 1. If text was already selected (e.g. user selected it with mouse), convert selection
+        if (convert_selection(true)) return;
+
+        // 2. Select current line (Home -> Shift+End)
         if (!send_line_selection()) return;
-        Sleep(90);
-        convert_selection(true);
+        Sleep(40);
+
+        if (!convert_selection(true)) {
+            // Unselect on no-op so line does not stay highlighted
+            INPUT unsel[]{key_input(VK_RIGHT, 0, 0), key_input(VK_RIGHT, 0, KEYEVENTF_KEYUP)};
+            SendInput(static_cast<UINT>(std::size(unsel)), unsel, sizeof(INPUT));
+        }
     }
 
     void change_case() noexcept {
-        if (!enabled || is_protected_foreground()) return;
+        if (!enabled) return;
+        if (last_foreground && IsWindow(last_foreground)) {
+            restore_target_focus(last_foreground);
+        }
+        if (is_protected_foreground()) return;
 
         const HWND foreground = GetForegroundWindow();
         if (!word.empty() && word_owner && word_owner == foreground) {
@@ -971,20 +1060,55 @@ struct Engine::Impl {
         if (!clipboard.capture()) return;
 
         std::wstring selected;
-        if (!copy_current_selection(selected) || selected.empty()) {
-            clipboard.restore();
-            return;
+        // 1. If text was already selected
+        if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
+            std::wstring next = next_case(selected);
+            if (next != selected) {
+                if (clipboard.restore()) {
+                    replace_text(0, next);
+                    clear_all();
+                    return;
+                }
+            }
         }
 
-        std::wstring next = next_case(selected);
-        if (next == selected) {
-            clipboard.restore();
-            return;
+        // 2. Select the word to the left of caret (Ctrl+Shift+Left)
+        if (send_word_selection(true)) {
+            Sleep(35);
+            if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
+                std::wstring next = next_case(selected);
+                if (next != selected) {
+                    if (clipboard.restore()) {
+                        replace_text(0, next);
+                        clear_all();
+                        return;
+                    }
+                }
+            }
+            // Collapse selection
+            INPUT unsel[]{key_input(VK_RIGHT, 0, 0), key_input(VK_RIGHT, 0, KEYEVENTF_KEYUP)};
+            SendInput(static_cast<UINT>(std::size(unsel)), unsel, sizeof(INPUT));
         }
 
-        if (!clipboard.restore()) return;
-        replace_text(0, next);
-        clear_all();
+        // 3. Fallback: try selecting word to the right (if cursor was at start of word)
+        if (send_word_selection(false)) {
+            Sleep(35);
+            if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
+                std::wstring next = next_case(selected);
+                if (next != selected) {
+                    if (clipboard.restore()) {
+                        replace_text(0, next);
+                        clear_all();
+                        return;
+                    }
+                }
+            }
+            // Collapse selection
+            INPUT unsel[]{key_input(VK_LEFT, 0, 0), key_input(VK_LEFT, 0, KEYEVENTF_KEYUP)};
+            SendInput(static_cast<UINT>(std::size(unsel)), unsel, sizeof(INPUT));
+        }
+
+        clipboard.restore();
     }
 
     ~Impl() {
