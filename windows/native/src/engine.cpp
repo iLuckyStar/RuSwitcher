@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cwctype>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -364,65 +365,6 @@ void switch_layout(HKL layout) noexcept {
     }
 }
 
-bool is_all_caps(std::wstring_view text) noexcept {
-    bool has_char = false;
-    for (wchar_t c : text) {
-        if (IsCharAlphaW(c)) {
-            has_char = true;
-            if (!IsCharUpperW(c)) return false;
-        }
-    }
-    return has_char;
-}
-
-bool looks_like_code(std::wstring_view text) noexcept {
-    for (std::size_t i = 1; i < text.size(); ++i) {
-        if (IsCharUpperW(text[i])) return true;
-    }
-    bool latin = false;
-    bool cyrillic = false;
-    for (wchar_t c : text) {
-        if ((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z')) {
-            latin = true;
-        } else if (c >= 0x0400 && c <= 0x04FF) {
-            cyrillic = true;
-        }
-    }
-    return latin && cyrillic;
-}
-
-bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
-                         HKL source, HKL target, bool caps) noexcept {
-    if (typed.size() < 3) return false;
-
-    for (wchar_t c : typed) {
-        if (!IsCharAlphaW(c) && c != L'\'' && c != L'\x2019') return false;
-    }
-
-    if (!caps) {
-        if (is_all_caps(typed)) return false;
-        if (looks_like_code(typed)) return false;
-    }
-
-    std::wstring lower_converted(converted);
-    if (!lower_converted.empty()) {
-        CharLowerBuffW(lower_converted.data(), static_cast<DWORD>(lower_converted.size()));
-    }
-
-    const bool target_is_brand = (converted.size() >= 4 && is_brand_word(lower_converted));
-    const bool valid_target = target_is_brand || Dict::is_valid_word(lower_converted, target);
-    if (!valid_target) return false;
-
-    std::wstring lower_typed(typed);
-    if (!lower_typed.empty()) {
-        CharLowerBuffW(lower_typed.data(), static_cast<DWORD>(lower_typed.size()));
-    }
-
-    if (Dict::is_valid_word(lower_typed, source)) return false;
-
-    return true;
-}
-
 struct ModTracker {
     bool down{};
     bool other_pressed{};
@@ -462,10 +404,55 @@ struct Engine::Impl {
     DWORD pending_boundary_vk{};
     HWND pending_boundary_owner{};
 
+    std::wstring last_app_process;
+    DWORD last_app_tid{0};
+    std::unordered_map<std::wstring, HKL> app_layouts;
+
     static Impl* instance;
 
     explicit Impl(HWND window, Settings* prefs) noexcept
         : message_window(window), settings(prefs) {}
+
+    void handle_foreground_switch(HWND new_window) noexcept {
+        if (!settings || !settings->per_app_layout()) return;
+
+        // Remember outgoing app's layout
+        if (!last_app_process.empty() && last_app_tid != 0) {
+            HKL prev_layout = GetKeyboardLayout(last_app_tid);
+            if (prev_layout) {
+                app_layouts[last_app_process] = prev_layout;
+            }
+        }
+
+        if (!new_window || !IsWindow(new_window)) {
+            last_app_process.clear();
+            last_app_tid = 0;
+            return;
+        }
+
+        DWORD new_pid = 0;
+        DWORD new_tid = GetWindowThreadProcessId(new_window, &new_pid);
+        std::wstring new_process = get_window_process_name(new_window);
+
+        last_app_process = new_process;
+        last_app_tid = new_tid;
+
+        if (new_process.empty()) return;
+
+        // Remote desktop clients: let remote host manage layout
+        if (new_process == L"mstsc.exe" || new_process == L"teamviewer.exe" || new_process == L"anydesk.exe") {
+            return;
+        }
+
+        auto it = app_layouts.find(new_process);
+        if (it != app_layouts.end() && it->second) {
+            HKL target = it->second;
+            HKL current = GetKeyboardLayout(new_tid);
+            if (target != current) {
+                PostMessageW(new_window, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(target));
+            }
+        }
+    }
 
     HKL target_layout(HKL current) const noexcept {
         if (first_layout && second_layout) {
@@ -576,7 +563,9 @@ struct Engine::Impl {
         }
 
         if (is_boundary(vk)) {
-            if (vk == VK_SPACE || vk == VK_RETURN || vk == VK_TAB) {
+            const bool allow_boundary = (vk == VK_SPACE) ||
+                ((vk == VK_RETURN || vk == VK_TAB) && (!settings || settings->word_end_enter_tab()));
+            if (allow_boundary) {
                 const HWND foreground = GetForegroundWindow();
                 if (!word.empty() && word_owner && word_owner == foreground) {
                     prev_word = word;
@@ -737,6 +726,7 @@ struct Engine::Impl {
         if (event == EVENT_SYSTEM_FOREGROUND) {
             if (useful_foreground(window, instance->message_window))
                 instance->last_foreground = window;
+            instance->handle_foreground_switch(window);
             instance->clear_all();
             return;
         }
@@ -780,7 +770,7 @@ struct Engine::Impl {
         return true;
     }
 
-    bool convert_selection(bool permit_undo) noexcept {
+    bool convert_selection(bool permit_undo, bool* had_selection = nullptr) noexcept {
         const HKL source = current_layout();
         const HKL target = target_layout(source);
         if (!source || !target) return false;
@@ -795,6 +785,7 @@ struct Engine::Impl {
             clipboard.restore();
             return false;
         }
+        if (had_selection) *had_selection = true;
         std::wstring converted = convert_text_bidirectional(selected, source, target);
         if (converted == selected) {
             clipboard.restore();
@@ -851,6 +842,10 @@ struct Engine::Impl {
         pending_boundary_word.clear();
         pending_boundary_vk = 0;
         pending_boundary_owner = nullptr;
+
+        if ((b_vk == VK_RETURN || b_vk == VK_TAB) && (!settings || !settings->word_end_enter_tab())) {
+            return;
+        }
 
         const HKL source = current_layout();
         const HKL target = target_layout(source);
@@ -1070,10 +1065,13 @@ struct Engine::Impl {
         if (!send_line_selection()) return;
         Sleep(30);
 
-        if (!convert_selection(true)) {
-            // Unselect on no-op so line does not stay highlighted
-            INPUT unsel[]{key_input(VK_RIGHT, 0, 0), key_input(VK_RIGHT, 0, KEYEVENTF_KEYUP)};
-            SendInput(static_cast<UINT>(std::size(unsel)), unsel, sizeof(INPUT));
+        bool had_selection = false;
+        if (!convert_selection(true, &had_selection)) {
+            // Unselect on no-op so line does not stay highlighted only if text was actually selected
+            if (had_selection) {
+                INPUT unsel[]{key_input(VK_RIGHT, 0, 0), key_input(VK_RIGHT, 0, KEYEVENTF_KEYUP)};
+                SendInput(static_cast<UINT>(std::size(unsel)), unsel, sizeof(INPUT));
+            }
         }
     }
 

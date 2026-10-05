@@ -293,5 +293,78 @@ std::wstring convert_text_bidirectional(std::wstring_view text, HKL layout1, HKL
     return result;
 }
 
+bool is_word_text(std::wstring_view text) noexcept {
+    if (text.empty()) return false;
+    for (wchar_t c : text) {
+        if (!IsCharAlphaW(c) && c != L'\'' && c != L'\x2019') return false;
+    }
+    return true;
+}
+
+namespace {
+
+bool is_all_caps(std::wstring_view text) noexcept {
+    bool has_char = false;
+    for (wchar_t c : text) {
+        if (IsCharAlphaW(c)) {
+            has_char = true;
+            if (!IsCharUpperW(c)) return false;
+        }
+    }
+    return has_char;
+}
+
+bool looks_like_code(std::wstring_view text) noexcept {
+    for (std::size_t i = 1; i < text.size(); ++i) {
+        if (IsCharUpperW(text[i])) return true;
+    }
+    bool latin = false;
+    bool cyrillic = false;
+    for (wchar_t c : text) {
+        if ((c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z')) {
+            latin = true;
+        } else if (c >= 0x0400 && c <= 0x04FF) {
+            cyrillic = true;
+        }
+    }
+    return latin && cyrillic;
+}
+
+}  // namespace
+
+bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
+                         HKL source, HKL target, bool caps) noexcept {
+    if (typed.size() < 3) return false;
+
+    // Both typed and converted cannot contain invalid symbols (digits, spaces, special chars).
+    // In Cyrillic, letters like х, ъ, ж, э, б, ю, ё reside on [ ] ; ' , . ` keys.
+    // Parity with macOS (issue #22):
+    // allow if either typed is all letters OR converted is all letters.
+    if (!is_word_text(typed) && !is_word_text(converted)) return false;
+
+    if (!caps) {
+        if (is_all_caps(typed)) return false;
+        if (looks_like_code(typed)) return false;
+    }
+
+    std::wstring lower_converted(converted);
+    if (!lower_converted.empty()) {
+        CharLowerBuffW(lower_converted.data(), static_cast<DWORD>(lower_converted.size()));
+    }
+
+    const bool target_is_brand = (converted.size() >= 4 && is_brand_word(lower_converted));
+    const bool valid_target = target_is_brand || Dict::is_valid_word(lower_converted, target);
+    if (!valid_target) return false;
+
+    std::wstring lower_typed(typed);
+    if (!lower_typed.empty()) {
+        CharLowerBuffW(lower_typed.data(), static_cast<DWORD>(lower_typed.size()));
+    }
+
+    if (Dict::is_valid_word(lower_typed, source)) return false;
+
+    return true;
+}
+
 }  // namespace ruswitcher
 

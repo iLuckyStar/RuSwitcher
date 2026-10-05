@@ -134,6 +134,7 @@ Settings::Settings() noexcept {
         convert_whole_line_ = read_bool(key, L"ConvertWholeLine", false);
         sound_on_switch_ = read_bool(key, L"SoundOnSwitch", false);
         word_end_enter_tab_ = read_bool(key, L"WordEndEnterTab", true);
+        per_app_layout_ = read_bool(key, L"PerAppLayout", true);
         saved_first = read_layout(key, L"FirstLayout");
         saved_second = read_layout(key, L"SecondLayout");
         RegCloseKey(key);
@@ -228,6 +229,11 @@ void Settings::set_sound_on_switch(bool value) noexcept {
 void Settings::set_word_end_enter_tab(bool value) noexcept {
     word_end_enter_tab_ = value;
     save_bool(L"WordEndEnterTab", value);
+}
+
+void Settings::set_per_app_layout(bool value) noexcept {
+    per_app_layout_ = value;
+    save_bool(L"PerAppLayout", value);
 }
 
 void Settings::save_layout(const wchar_t* name, HKL value) noexcept {

@@ -35,6 +35,15 @@ bool is_cyrillic_char(wchar_t c) noexcept;
 // Checks if character is in Latin script.
 bool is_latin_char(wchar_t c) noexcept;
 
+// Checks whether string consists entirely of letters (or apostrophe/single quote).
+bool is_word_text(std::wstring_view text) noexcept;
+
+// Determines whether typed word should be auto-converted to converted word.
+// Checks length (>= 3), valid word/brand in target dictionary, invalid in source dictionary,
+// acronym/caps/code exclusion, and allows punctuation keys for Cyrillic letters (e.g. '[', ']', ';', etc.).
+bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
+                         HKL source, HKL target, bool caps = false) noexcept;
+
 // Bidirectionally converts text between two layouts (Layout 1 <-> Layout 2) in a single pass.
 // Each Latin character is converted to Cyrillic, and each Cyrillic character is converted to Latin.
 // If layouts are null, falls back to the canonical EN (QWERTY) <-> RU (ЙЦУКЕН) mapping.

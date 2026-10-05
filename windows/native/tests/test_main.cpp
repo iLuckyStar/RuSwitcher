@@ -204,10 +204,42 @@ void test_clipboard_snapshot() {
     }
 
     std::cout << "[PASS] Clipboard snapshot save and restore test\n";
-    OleUninitialize();
+}
+
+void test_should_auto_convert() {
+    HKL en_layout = LoadKeyboardLayoutW(L"00000409", KLF_NOTELLSHELL);
+    HKL ru_layout = LoadKeyboardLayoutW(L"00000419", KLF_NOTELLSHELL);
+    if (!en_layout) en_layout = GetKeyboardLayout(0);
+    if (!ru_layout) ru_layout = en_layout;
+
+    // 1. Cyrillic words containing punctuation keys on EN keyboard:
+    // "[jhjij" -> "хорошо" ('[' is 'х' in RU)
+    assert(should_auto_convert(L"[jhjij", L"хорошо", en_layout, ru_layout, false));
+
+    // "rf;tncz" -> "кажется" (';' is 'ж' in RU)
+    assert(should_auto_convert(L"rf;tncz", L"кажется", en_layout, ru_layout, false));
+
+    // 2. Standard Latin -> Cyrillic: "ghbdtn" -> "привет"
+    assert(should_auto_convert(L"ghbdtn", L"привет", en_layout, ru_layout, false));
+
+    // 3. Valid English word typed in EN layout should NOT auto-convert
+    // "table" -> "ефиду"
+    assert(!should_auto_convert(L"table", L"ефиду", en_layout, ru_layout, false));
+
+    // 4. Too short words (< 3) should NOT auto-convert
+    assert(!should_auto_convert(L"gh", L"пр", en_layout, ru_layout, false));
+
+    // 5. Code identifiers (camelCase) should NOT auto-convert
+    assert(!should_auto_convert(L"getUser", L"пуеГыук", en_layout, ru_layout, false));
+
+    // 6. ALL CAPS acronyms should NOT auto-convert
+    assert(!should_auto_convert(L"NASA", L"ТФЫФ", en_layout, ru_layout, false));
+
+    std::cout << "[PASS] Auto-convert heuristics and punctuation keys tests\n";
 }
 
 int main() {
+    OleInitialize(nullptr);
     std::cout << "Running RuSwitcher native unit tests...\n";
     test_brand_words();
     test_two_caps();
@@ -215,7 +247,9 @@ int main() {
     test_fix_number();
     test_convert_text_bidirectional();
     test_clipboard_snapshot();
+    test_should_auto_convert();
     std::cout << "All native unit tests PASSED successfully!\n";
+    OleUninitialize();
     return 0;
 }
 

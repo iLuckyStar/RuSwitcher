@@ -24,6 +24,8 @@ constexpr UINT kCommandAbout = 110;
 constexpr UINT kCommandExit = 111;
 constexpr UINT kCommandScopeWord = 112;
 constexpr UINT kCommandScopeLine = 113;
+constexpr UINT kCommandWordEndEnterTab = 114;
+constexpr UINT kCommandPerAppLayout = 115;
 
 constexpr UINT kTriggerBase = 200;      // 200..204
 constexpr UINT kSwitchBase = 210;       // 210..215
@@ -140,7 +142,11 @@ struct Tray::Impl {
 
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, checked(settings.auto_convert()), kCommandAutoConvert,
-                    L"Авто-конвертация при наборе (Space / Enter / Tab)");
+                    L"Авто-конвертация на лету");
+        AppendMenuW(menu, checked(settings.word_end_enter_tab()), kCommandWordEndEnterTab,
+                    L"Считать границей слова Enter и Tab");
+        AppendMenuW(menu, checked(settings.per_app_layout()), kCommandPerAppLayout,
+                    L"Запоминать раскладку для каждого приложения");
         AppendMenuW(menu, checked(settings.fix_two_caps()), kCommandFixTwoCaps,
                     L"Исправлять две заглавные (ПРивет → Привет)");
         AppendMenuW(menu, checked(settings.fix_numbers()), kCommandFixNumbers,
@@ -201,6 +207,10 @@ struct Tray::Impl {
             settings.set_case_hotkey(static_cast<CaseKey>(id - kCaseBase));
         } else if (id == kCommandAutoConvert) {
             settings.set_auto_convert(!settings.auto_convert());
+        } else if (id == kCommandWordEndEnterTab) {
+            settings.set_word_end_enter_tab(!settings.word_end_enter_tab());
+        } else if (id == kCommandPerAppLayout) {
+            settings.set_per_app_layout(!settings.per_app_layout());
         } else if (id == kCommandFixTwoCaps) {
             settings.set_fix_two_caps(!settings.fix_two_caps());
         } else if (id == kCommandFixNumbers) {

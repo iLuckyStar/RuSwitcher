@@ -18,10 +18,12 @@ constexpr int IDC_COMBO_FIRST = 1005;
 constexpr int IDC_COMBO_SECOND = 1006;
 
 constexpr int IDC_CHK_AUTOCONVERT = 1010;
-constexpr int IDC_CHK_TWOCAPS = 1011;
-constexpr int IDC_CHK_NUMBERS = 1012;
-constexpr int IDC_CHK_SOUND = 1013;
-constexpr int IDC_CHK_AUTOSTART = 1014;
+constexpr int IDC_CHK_WORDEND = 1011;
+constexpr int IDC_CHK_PERAPP = 1012;
+constexpr int IDC_CHK_TWOCAPS = 1013;
+constexpr int IDC_CHK_NUMBERS = 1014;
+constexpr int IDC_CHK_SOUND = 1015;
+constexpr int IDC_CHK_AUTOSTART = 1016;
 
 constexpr int IDC_BTN_OK = 1020;
 constexpr int IDC_BTN_CANCEL = 1021;
@@ -37,11 +39,14 @@ struct DialogContext {
     HWND cb_first{};
     HWND cb_second{};
     HWND chk_autoconvert{};
+    HWND chk_wordend{};
+    HWND chk_perapp{};
     HWND chk_twocaps{};
     HWND chk_numbers{};
     HWND chk_sound{};
     HWND chk_autostart{};
     HFONT font{};
+    bool closed{false};
 };
 
 DialogContext* g_dlg_ctx = nullptr;
@@ -125,32 +130,42 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся строка целиком (Shift+Home)"));
             SendMessageW(ctx->cb_scope, CB_SETCURSEL, ctx->settings.convert_whole_line() ? 1 : 0, 0);
 
-            y += 42;
+            y += 40;
             ctx->chk_autoconvert = create_checkbox(hwnd, inst, IDC_CHK_AUTOCONVERT,
-                L"Авто-конвертация на лету (по Space, Enter, Tab)", 16, y, 420, 22, font);
+                L"Авто-конвертация на лету (по словарю)", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_autoconvert, BM_SETCHECK, ctx->settings.auto_convert() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-            y += 28;
+            y += 26;
+            ctx->chk_wordend = create_checkbox(hwnd, inst, IDC_CHK_WORDEND,
+                L"Считать границей слова Enter и Tab", 16, y, 420, 22, font);
+            SendMessageW(ctx->chk_wordend, BM_SETCHECK, ctx->settings.word_end_enter_tab() ? BST_CHECKED : BST_UNCHECKED, 0);
+
+            y += 26;
+            ctx->chk_perapp = create_checkbox(hwnd, inst, IDC_CHK_PERAPP,
+                L"Запоминать раскладку для каждого приложения", 16, y, 420, 22, font);
+            SendMessageW(ctx->chk_perapp, BM_SETCHECK, ctx->settings.per_app_layout() ? BST_CHECKED : BST_UNCHECKED, 0);
+
+            y += 26;
             ctx->chk_twocaps = create_checkbox(hwnd, inst, IDC_CHK_TWOCAPS,
                 L"Исправлять две заглавные буквы (ПРивет → Привет)", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_twocaps, BM_SETCHECK, ctx->settings.fix_two_caps() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-            y += 28;
+            y += 26;
             ctx->chk_numbers = create_checkbox(hwnd, inst, IDC_CHK_NUMBERS,
                 L"Исправлять опечатки в цифрах (1ю8 → 1.8, 5б2 → 5,2)", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_numbers, BM_SETCHECK, ctx->settings.fix_numbers() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-            y += 28;
+            y += 26;
             ctx->chk_sound = create_checkbox(hwnd, inst, IDC_CHK_SOUND,
                 L"Звуковой сигнал при переключении раскладки", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_sound, BM_SETCHECK, ctx->settings.sound_on_switch() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-            y += 28;
+            y += 26;
             ctx->chk_autostart = create_checkbox(hwnd, inst, IDC_CHK_AUTOSTART,
                 L"Запускать RuSwitcher при входе в систему", 16, y, 420, 22, font);
             SendMessageW(ctx->chk_autostart, BM_SETCHECK, ctx->settings.autostart_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
 
-            y += 38;
+            y += 36;
             create_label(hwnd, inst, L"Первая раскладка:", 16, y + 4, 150, 20, font);
             ctx->cb_first = create_combo(hwnd, inst, IDC_COMBO_FIRST, 170, y, 260, 200, font);
 
@@ -170,7 +185,7 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             SendMessageW(ctx->cb_first, CB_SETCURSEL, sel_first, 0);
             SendMessageW(ctx->cb_second, CB_SETCURSEL, sel_second, 0);
 
-            y += 48;
+            y += 44;
             create_button(hwnd, inst, IDC_BTN_OK, L"Сохранить", 230, y, 100, 28, font, true);
             create_button(hwnd, inst, IDC_BTN_CANCEL, L"Отмена", 340, y, 90, 28, font, false);
             return 0;
@@ -191,6 +206,8 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                     if (cs_sel >= 0) ctx->settings.set_case_hotkey(static_cast<CaseKey>(cs_sel));
 
                     ctx->settings.set_auto_convert(SendMessageW(ctx->chk_autoconvert, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    ctx->settings.set_word_end_enter_tab(SendMessageW(ctx->chk_wordend, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                    ctx->settings.set_per_app_layout(SendMessageW(ctx->chk_perapp, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_fix_two_caps(SendMessageW(ctx->chk_twocaps, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_fix_numbers(SendMessageW(ctx->chk_numbers, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     int sc_sel = static_cast<int>(SendMessageW(ctx->cb_scope, CB_GETCURSEL, 0, 0));
@@ -225,11 +242,13 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             return 0;
 
         case WM_DESTROY:
-            if (g_dlg_ctx && g_dlg_ctx->font) {
-                DeleteObject(g_dlg_ctx->font);
-                g_dlg_ctx->font = nullptr;
+            if (g_dlg_ctx) {
+                if (g_dlg_ctx->font) {
+                    DeleteObject(g_dlg_ctx->font);
+                    g_dlg_ctx->font = nullptr;
+                }
+                g_dlg_ctx->closed = true;
             }
-            PostQuitMessage(0);
             return 0;
     }
     return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -251,7 +270,7 @@ void SettingsDialog::show(HWND parent, HINSTANCE instance, Engine& engine, Setti
     RegisterClassW(&wc);
 
     const int width = 460;
-    const int height = 480;
+    const int height = 540;
     const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
@@ -265,11 +284,14 @@ void SettingsDialog::show(HWND parent, HINSTANCE instance, Engine& engine, Setti
     SetForegroundWindow(hwnd);
 
     MSG msg{};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (!ctx.closed && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (!IsDialogMessageW(hwnd, &msg)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+    }
+    if (msg.message == WM_QUIT) {
+        PostQuitMessage(static_cast<int>(msg.wParam));
     }
 
     EnableWindow(parent, TRUE);

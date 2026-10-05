@@ -13,6 +13,21 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
 *Fork maintained by [iLuckyStar](https://github.com/iLuckyStar) bringing the latest algorithmic breakthroughs from macOS v3.5.0b to Windows.*
 
 #### Added & Improved
+- **🔤 Cyrillic Punctuation Keys Auto-Conversion (macOS parity issue #22):**
+  - Resolved regression where Russian words containing letters situated on punctuation keys (`х` on `[`, `ъ` on `]`, `ж` on `;`, `э` on `'`, `б` on `,`, `ю` on `.`, `ё` on `` ` ``) failed auto-conversion (e.g. `[jhjij` $\to$ `хорошо`, `rf;tncz` $\to$ `кажется`).
+  - Generalized heuristic: allows auto-conversion whenever either the typed text or the converted target consists entirely of valid letters.
+- **💾 Per-App Keyboard Layout Memory (Запоминание раскладки для каждого приложения):**
+  - Full parity with macOS `PerAppLayoutManager.swift` and C# `AppLayoutTracker.cs`.
+  - Remembers the active keyboard layout for each process and restores it automatically upon regaining focus.
+  - Safely ignores remote desktop sessions (`mstsc.exe`, `anydesk.exe`, `teamviewer.exe`) so the remote session controls layout natively.
+  - Fully configurable via Settings Dialog and Tray context menu.
+- **🛡️ Process Safety Policy & Cached UI Automation (Безопасность процессов):**
+  - Hardened foreground safety checks to protect terminals (`cmd.exe`, `powershell.exe`, `pwsh.exe`, `windowsterminal.exe`, `bash.exe`, `wsl.exe`, `alacritty.exe`, `wezterm-gui.exe`, `kitty.exe`, `putty.exe`) and password managers (`1password.exe`, `bitwarden.exe`, `keepass.exe`, `keepassxc.exe`).
+  - Cached `IUIAutomation` COM singleton for zero-overhead password field detection.
+- **⚡ Modal Settings Dialog Isolation Fix:**
+  - Removed `PostQuitMessage(0)` from child `SettingsDialog` window destruction, ensuring closing settings never inadvertently terminates the application thread.
+- **🎯 Empty Line Cursor Drift Fix:**
+  - Fixed cursor jump on line conversion (`convert_line`) when invoked on an empty line: only drops selection with `VK_RIGHT` if text was actually selected.
 - **🛡️ Bulletproof Clipboard Protection (Защита буфера обмена):**
   - Complete isolation and preservation of the user's clipboard during text conversion and case cycling.
   - Replaced unreliable OLE `IDataObject` / `OleFlushClipboard` with an exact Win32 multi-format snapshot (`EnumClipboardFormats`, `GlobalAlloc`, `GlobalLock`, `SetClipboardData`).

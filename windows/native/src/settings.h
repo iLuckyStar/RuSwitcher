@@ -77,6 +77,9 @@ public:
     bool word_end_enter_tab() const noexcept { return word_end_enter_tab_; }
     void set_word_end_enter_tab(bool value) noexcept;
 
+    bool per_app_layout() const noexcept { return per_app_layout_; }
+    void set_per_app_layout(bool value) noexcept;
+
     const std::vector<LayoutChoice>& layouts() const noexcept { return layouts_; }
 
     bool autostart_enabled() const noexcept;
@@ -100,6 +103,7 @@ private:
     bool convert_whole_line_{false};
     bool sound_on_switch_{false};
     bool word_end_enter_tab_{true};
+    bool per_app_layout_{true};
 
     void save_layout(const wchar_t* name, HKL value) noexcept;
     void save_bool(const wchar_t* name, bool value) noexcept;
