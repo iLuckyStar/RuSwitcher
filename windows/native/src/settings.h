@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "keystroke_buffer.h"
+
 namespace ruswitcher {
 
 enum class TriggerKey : uint32_t {
@@ -68,7 +70,10 @@ public:
     bool auto_convert() const noexcept { return auto_convert_; }
     void set_auto_convert(bool value) noexcept;
 
-    bool convert_whole_line() const noexcept { return convert_whole_line_; }
+    ConversionScope conversion_scope() const noexcept { return conversion_scope_; }
+    void set_conversion_scope(ConversionScope value) noexcept;
+
+    bool convert_whole_line() const noexcept { return conversion_scope_ != ConversionScope::Word; }
     void set_convert_whole_line(bool value) noexcept;
 
     bool sound_on_switch() const noexcept { return sound_on_switch_; }
@@ -100,7 +105,7 @@ private:
     bool fix_two_caps_{true};
     bool fix_numbers_{true};
     bool auto_convert_{false};
-    bool convert_whole_line_{false};
+    ConversionScope conversion_scope_{ConversionScope::Word};
     bool sound_on_switch_{false};
     bool word_end_enter_tab_{true};
     bool per_app_layout_{true};

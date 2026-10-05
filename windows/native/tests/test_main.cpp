@@ -6,6 +6,7 @@
 
 #include "brand_words.h"
 #include "dict.h"
+#include "keystroke_buffer.h"
 #include "text_fixes.h"
 
 using namespace ruswitcher;
@@ -238,6 +239,69 @@ void test_should_auto_convert() {
     std::cout << "[PASS] Auto-convert heuristics and punctuation keys tests\n";
 }
 
+void test_keystroke_buffer() {
+    KeystrokeBuffer b;
+    assert(b.is_empty());
+    assert(b.is_line_empty());
+
+    TypedKey a{'A', 0x1E, false, false};
+    TypedKey b_key{'B', 0x30, true, false};
+    b.append(a);
+    b.append(b_key);
+    assert(b.current_word().size() == 2);
+    assert(b.current_line().size() == 2);
+    assert(b.current_word()[1].shift);
+
+    b.reset();
+    assert(b.is_empty());
+    assert(b.is_line_empty());
+
+    // Test line keeps spaces and backspace rebuilds current word
+    TypedKey space{VK_SPACE, 0x39, false, false};
+    TypedKey c{'C', 0x2E, false, false};
+
+    b.append(a);
+    b.append_space(space);
+    b.append(c);
+    assert(b.current_line().size() == 3);
+    assert(b.current_word().size() == 1);
+
+    b.backspace(); // remove 'C'
+    assert(b.is_empty());
+    assert(b.current_line().size() == 2);
+
+    b.backspace(); // remove space -> restores 'A'
+    assert(b.current_word().size() == 1);
+    assert(b.current_word()[0].vk == 'A');
+    assert(b.current_line().size() == 1);
+
+    b.backspace(); // remove 'A'
+    assert(b.is_empty());
+    assert(b.is_line_empty());
+
+    std::cout << "[PASS] Keystroke buffer parity tests (rebuild on space/backspace)\n";
+}
+
+void test_trigger_routing() {
+    // 1. Typed word uses buffer
+    assert(decide_trigger_action(ConversionScope::Word, false, 6, 6) == TriggerAction::BufferedWord);
+
+    // 2. Phrase mode prefers safe buffer
+    assert(decide_trigger_action(ConversionScope::Phrase, false, 6, 12) == TriggerAction::BufferedLine);
+
+    // 3. Empty buffer in word mode falls back to selected text
+    assert(decide_trigger_action(ConversionScope::Word, false, 0, 0) == TriggerAction::SelectedText);
+
+    // 4. Empty buffer in system line mode falls back to system selection
+    assert(decide_trigger_action(ConversionScope::SystemLine, false, 0, 0) == TriggerAction::SystemLine);
+
+    // 5. Reconvert requires empty buffer
+    assert(decide_trigger_action(ConversionScope::Word, true, 0, 0) == TriggerAction::Reconvert);
+    assert(decide_trigger_action(ConversionScope::Phrase, true, 0, 2) == TriggerAction::BufferedLine);
+
+    std::cout << "[PASS] Trigger routing parity tests (Word / Phrase / SystemLine / Reconvert)\n";
+}
+
 int main() {
     OleInitialize(nullptr);
     std::cout << "Running RuSwitcher native unit tests...\n";
@@ -248,6 +312,8 @@ int main() {
     test_convert_text_bidirectional();
     test_clipboard_snapshot();
     test_should_auto_convert();
+    test_keystroke_buffer();
+    test_trigger_routing();
     std::cout << "All native unit tests PASSED successfully!\n";
     OleUninitialize();
     return 0;

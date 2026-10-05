@@ -131,7 +131,13 @@ Settings::Settings() noexcept {
         fix_two_caps_ = read_bool(key, L"FixTwoCaps", true);
         fix_numbers_ = read_bool(key, L"FixNumbers", true);
         auto_convert_ = read_bool(key, L"AutoConvert", false);
-        convert_whole_line_ = read_bool(key, L"ConvertWholeLine", false);
+        const DWORD scope_val = read_dword(key, L"ConversionScope", 0xFFFFFFFF);
+        if (scope_val != 0xFFFFFFFF) {
+            conversion_scope_ = static_cast<ConversionScope>(scope_val <= 2 ? scope_val : 0);
+        } else {
+            const bool whole_line = read_bool(key, L"ConvertWholeLine", false);
+            conversion_scope_ = whole_line ? ConversionScope::Phrase : ConversionScope::Word;
+        }
         sound_on_switch_ = read_bool(key, L"SoundOnSwitch", false);
         word_end_enter_tab_ = read_bool(key, L"WordEndEnterTab", true);
         per_app_layout_ = read_bool(key, L"PerAppLayout", true);
@@ -216,9 +222,14 @@ void Settings::set_auto_convert(bool value) noexcept {
     save_bool(L"AutoConvert", value);
 }
 
+void Settings::set_conversion_scope(ConversionScope value) noexcept {
+    conversion_scope_ = value;
+    save_dword(L"ConversionScope", static_cast<DWORD>(value));
+    save_bool(L"ConvertWholeLine", value != ConversionScope::Word);
+}
+
 void Settings::set_convert_whole_line(bool value) noexcept {
-    convert_whole_line_ = value;
-    save_bool(L"ConvertWholeLine", value);
+    set_conversion_scope(value ? ConversionScope::Phrase : ConversionScope::Word);
 }
 
 void Settings::set_sound_on_switch(bool value) noexcept {

@@ -5,6 +5,7 @@
 #include "diagnostics.h"
 #include "dict.h"
 #include "input_safety.h"
+#include "keystroke_buffer.h"
 #include "settings.h"
 #include "text_fixes.h"
 
@@ -24,6 +25,7 @@ constexpr UINT kTriggerMessage = WM_APP + 1;
 constexpr UINT kBoundaryMessage = WM_APP + 3;
 constexpr UINT kSwitchMessage = WM_APP + 4;
 constexpr UINT kCaseMessage = WM_APP + 5;
+constexpr UINT kLineMessage = WM_APP + 6;
 constexpr ULONGLONG kDoubleTapWindowMs = 350;
 
 bool is_control(DWORD vk) noexcept {
@@ -38,32 +40,8 @@ bool is_alt(DWORD vk) noexcept {
     return vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU;
 }
 
-bool is_typing_key(DWORD vk) noexcept {
-    return (vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z') ||
-           (vk >= VK_OEM_1 && vk <= VK_OEM_3) ||
-           (vk >= VK_OEM_4 && vk <= VK_OEM_8) || vk == VK_OEM_102;
-}
-
 bool is_boundary(DWORD vk) noexcept {
-    return vk == VK_SPACE || vk == VK_RETURN || vk == VK_TAB || vk == VK_ESCAPE;
-}
-
-bool invalidates_buffer(DWORD vk) noexcept {
-    switch (vk) {
-        case VK_DELETE:
-        case VK_INSERT:
-        case VK_HOME:
-        case VK_END:
-        case VK_LEFT:
-        case VK_UP:
-        case VK_RIGHT:
-        case VK_DOWN:
-        case VK_PRIOR:
-        case VK_NEXT:
-            return true;
-        default:
-            return false;
-    }
+    return is_word_boundary(vk);
 }
 
 bool shortcut_modifier_down() noexcept {
@@ -198,6 +176,10 @@ HKL first_other_layout(HKL current) noexcept {
 }
 
 bool translate_key(const TypedKey& key, HKL layout, wchar_t& character) noexcept {
+    if (key.vk == VK_SPACE) {
+        character = L' ';
+        return true;
+    }
     std::array<BYTE, 256> state{};
     if (key.shift) state[VK_SHIFT] = 0x80;
     if (key.caps) state[VK_CAPITAL] = 0x01;
@@ -381,7 +363,7 @@ struct Engine::Impl {
     HWINEVENTHOOK foreground_hook{};
     HWINEVENTHOOK focus_hook{};
 
-    std::vector<TypedKey> word;
+    KeystrokeBuffer buffer;
     std::vector<TypedKey> prev_word;
     int boundary_count{};
     HWND word_owner{};
@@ -484,12 +466,13 @@ struct Engine::Impl {
 
 
     void clear_word() noexcept {
-        word.clear();
+        buffer.clear_word();
         word_owner = nullptr;
     }
 
     void clear_all() noexcept {
-        clear_word();
+        buffer.clear_all();
+        word_owner = nullptr;
         prev_word.clear();
         boundary_count = 0;
         undo_available = false;
@@ -554,10 +537,10 @@ struct Engine::Impl {
         if (vk == VK_BACK) {
             undo_available = false;
             if (shortcut_modifier_down()) {
-                clear_word();
-            } else if (!word.empty()) {
-                word.pop_back();
-                if (word.empty()) word_owner = nullptr;
+                clear_all();
+            } else {
+                buffer.backspace();
+                if (buffer.is_line_empty()) word_owner = nullptr;
             }
             return;
         }
@@ -567,10 +550,10 @@ struct Engine::Impl {
                 ((vk == VK_RETURN || vk == VK_TAB) && (!settings || settings->word_end_enter_tab()));
             if (allow_boundary) {
                 const HWND foreground = GetForegroundWindow();
-                if (!word.empty() && word_owner && word_owner == foreground) {
-                    prev_word = word;
+                if (!buffer.is_empty() && word_owner && word_owner == foreground) {
+                    prev_word = buffer.current_word();
                     boundary_count = 1;
-                    pending_boundary_word = word;
+                    pending_boundary_word = buffer.current_word();
                     pending_boundary_vk = vk;
                     pending_boundary_owner = word_owner;
                     PostMessageW(message_window, kBoundaryMessage, 0, 0);
@@ -581,7 +564,14 @@ struct Engine::Impl {
                 prev_word.clear();
                 boundary_count = 0;
             }
-            clear_word();
+
+            if (vk == VK_SPACE) {
+                const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                const bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+                buffer.append_space(TypedKey{VK_SPACE, scan, shift, caps});
+            } else {
+                clear_all();
+            }
             undo_available = false;
             return;
         }
@@ -593,8 +583,8 @@ struct Engine::Impl {
             }
             const HWND foreground = GetForegroundWindow();
             if (useful_foreground(foreground, message_window)) last_foreground = foreground;
-            if (word_owner && foreground != word_owner) clear_word();
-            if (word.empty()) {
+            if (word_owner && foreground != word_owner) clear_all();
+            if (buffer.is_line_empty()) {
                 word_owner = foreground;
                 prev_word.clear();
                 boundary_count = 0;
@@ -602,7 +592,7 @@ struct Engine::Impl {
 
             const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
             const bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-            word.push_back(TypedKey{vk, scan, shift, caps});
+            buffer.append(TypedKey{vk, scan, shift, caps});
             undo_available = false;
         } else if (invalidates_buffer(vk)) {
             clear_all();
@@ -684,6 +674,11 @@ struct Engine::Impl {
                 // 2. Pause / Break Interception
                 if (key->vkCode == VK_PAUSE && instance->settings) {
                     if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) {
+                        const bool shift_held = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                        if (shift_held) {
+                            PostMessageW(instance->message_window, kLineMessage, 0, 0);
+                            return 1;
+                        }
                         if (instance->settings->switch_hotkey() == SwitchKey::PauseBreak) {
                             PostMessageW(instance->message_window, kSwitchMessage, 0, 0);
                             return 1;
@@ -869,6 +864,7 @@ struct Engine::Impl {
                     screen_layout = source;
                     alternate_layout = source;
                     undo_available = true;
+                    clear_all();
                     return;
                 }
             }
@@ -884,6 +880,7 @@ struct Engine::Impl {
                     screen_layout = source;
                     alternate_layout = source;
                     undo_available = true;
+                    clear_all();
                     return;
                 }
             }
@@ -911,6 +908,7 @@ struct Engine::Impl {
                         screen_layout = target;
                         alternate_layout = source;
                         undo_available = true;
+                        clear_all();
                         return;
                     }
                 }
@@ -932,6 +930,137 @@ struct Engine::Impl {
         }
     }
 
+    bool convert_buffered_line() noexcept {
+        const auto& line_keys = buffer.current_line();
+        if (line_keys.empty()) return false;
+        const HWND foreground = GetForegroundWindow();
+        if (word_owner && foreground != word_owner) {
+            clear_all();
+            return false;
+        }
+
+        const HKL source = current_layout();
+        const HKL target = target_layout(source);
+        if (!source || !target) return false;
+
+        std::wstring original;
+        std::wstring converted;
+        if (!translate_keys(line_keys, line_keys.size(), source, original) || original.empty()) {
+            return false;
+        }
+
+        if (!translate_keys(line_keys, line_keys.size(), target, converted) || converted.empty() || converted == original) {
+            converted = convert_text_bidirectional(original, source, target);
+        }
+
+        if (converted.empty() || converted == original) return false;
+
+        const std::size_t to_delete = line_keys.size();
+        if (!replace_text(to_delete, converted)) return false;
+
+        switch_layout(target);
+
+        screen_text = std::move(converted);
+        alternate_text = std::move(original);
+        screen_layout = target;
+        alternate_layout = source;
+        undo_available = true;
+
+        clear_all();
+
+        if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+        return true;
+    }
+
+    bool convert_buffered_word() noexcept {
+        const auto& word = buffer.current_word();
+        if (word.empty()) return false;
+        const HWND foreground = GetForegroundWindow();
+        if (word_owner && foreground != word_owner) return false;
+
+        const HKL source = current_layout();
+        const HKL target = target_layout(source);
+        if (!source || !target) return false;
+
+        std::size_t core_count = word.size();
+        std::wstring suffix;
+        while (core_count > 0) {
+            wchar_t source_character{};
+            if (!translate_key(word[core_count - 1], source, source_character) ||
+                !is_trailing_punctuation(source_character))
+                break;
+            suffix.insert(suffix.begin(), source_character);
+            --core_count;
+        }
+        if (core_count == 0) return false;
+
+        std::wstring original;
+        std::wstring converted;
+        if (!translate_keys(word, core_count, source, original) ||
+            !translate_keys(word, core_count, target, converted) || converted.empty())
+            return false;
+        original += suffix;
+        converted += suffix;
+        if (original == converted) return false;
+
+        if (!replace_text(word.size(), converted)) return false;
+        switch_layout(target);
+
+        screen_text = std::move(converted);
+        alternate_text = std::move(original);
+        screen_layout = target;
+        alternate_layout = source;
+        undo_available = true;
+        clear_all();
+        if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+        return true;
+    }
+
+    bool convert_prev_word_boundary() noexcept {
+        if (prev_word.empty() || boundary_count <= 0) return false;
+        const HWND foreground = GetForegroundWindow();
+        if (word_owner && word_owner != foreground) return false;
+
+        const HKL source = current_layout();
+        const HKL target = target_layout(source);
+        if (!source || !target) return false;
+
+        std::size_t core_count = prev_word.size();
+        std::wstring suffix;
+        while (core_count > 0) {
+            wchar_t source_character{};
+            if (!translate_key(prev_word[core_count - 1], source, source_character) ||
+                !is_trailing_punctuation(source_character))
+                break;
+            suffix.insert(suffix.begin(), source_character);
+            --core_count;
+        }
+        if (core_count == 0) return false;
+
+        std::wstring original;
+        std::wstring converted;
+        if (!translate_keys(prev_word, core_count, source, original) ||
+            !translate_keys(prev_word, core_count, target, converted) || converted.empty())
+            return false;
+        original += suffix;
+        converted += suffix;
+        std::wstring spaces(static_cast<std::size_t>(boundary_count), L' ');
+        const std::size_t to_delete = prev_word.size() + boundary_count;
+        if (!replace_text(to_delete, converted + spaces)) return false;
+
+        switch_layout(target);
+        screen_text = converted + spaces;
+        alternate_text = original + spaces;
+        screen_layout = target;
+        alternate_layout = source;
+        undo_available = true;
+        prev_word.clear();
+        boundary_count = 0;
+        clear_all();
+        if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+        return true;
+    }
+
     void convert_or_undo() noexcept {
         if (!enabled) return;
         if (is_protected_foreground()) {
@@ -940,7 +1069,8 @@ struct Engine::Impl {
             return;
         }
 
-        if (undo_available) {
+        // 1. Undo / Reconvert
+        if (undo_available && buffer.is_line_empty()) {
             if (replace_text(editing_length(screen_text), alternate_text)) {
                 switch_layout(alternate_layout);
                 std::swap(screen_text, alternate_text);
@@ -949,100 +1079,52 @@ struct Engine::Impl {
             return;
         }
 
-        if (settings && settings->convert_whole_line()) {
-            convert_line();
-            return;
-        }
+        const ConversionScope scope = settings ? settings->conversion_scope() : ConversionScope::Word;
+        const HWND foreground = GetForegroundWindow();
 
-        // Case A: Word in active buffer
-        if (!word.empty() && word_owner == GetForegroundWindow()) {
-            const HKL source = current_layout();
-            const HKL target = target_layout(source);
-            if (!source || !target) return;
+        // 2. Decide trigger action using canonical TriggerRouting
+        const TriggerAction action = decide_trigger_action(
+            scope, undo_available, buffer.current_word().size(), buffer.current_line().size());
 
-            std::size_t core_count = word.size();
-            std::wstring suffix;
-            while (core_count > 0) {
-                wchar_t source_character{};
-                if (!translate_key(word[core_count - 1], source, source_character) ||
-                    !is_trailing_punctuation(source_character))
-                    break;
-                suffix.insert(suffix.begin(), source_character);
-                --core_count;
-            }
-            if (core_count == 0) return;
-
-            std::wstring original;
-            std::wstring converted;
-            if (!translate_keys(word, core_count, source, original) ||
-                !translate_keys(word, core_count, target, converted) || converted.empty())
+        switch (action) {
+            case TriggerAction::Reconvert: {
+                if (replace_text(editing_length(screen_text), alternate_text)) {
+                    switch_layout(alternate_layout);
+                    std::swap(screen_text, alternate_text);
+                    std::swap(screen_layout, alternate_layout);
+                }
                 return;
-            original += suffix;
-            converted += suffix;
-            if (original == converted) return;
-
-            if (!replace_text(word.size(), converted)) return;
-            switch_layout(target);
-
-            screen_text = std::move(converted);
-            alternate_text = std::move(original);
-            screen_layout = target;
-            alternate_layout = source;
-            undo_available = true;
-            clear_word();
-            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
-            return;
-        }
-
-        // Case B: Word was just completed with boundary (macOS parity with prevWordKeys)
-        if (word.empty() && !prev_word.empty() && boundary_count > 0 && word_owner == GetForegroundWindow()) {
-            const HKL source = current_layout();
-            const HKL target = target_layout(source);
-            if (source && target) {
-                std::size_t core_count = prev_word.size();
-                std::wstring suffix;
-                while (core_count > 0) {
-                    wchar_t source_character{};
-                    if (!translate_key(prev_word[core_count - 1], source, source_character) ||
-                        !is_trailing_punctuation(source_character))
-                        break;
-                    suffix.insert(suffix.begin(), source_character);
-                    --core_count;
-                }
-                if (core_count > 0) {
-                    std::wstring original;
-                    std::wstring converted;
-                    if (translate_keys(prev_word, core_count, source, original) &&
-                        translate_keys(prev_word, core_count, target, converted) && !converted.empty()) {
-                        original += suffix;
-                        converted += suffix;
-                        std::wstring spaces(static_cast<std::size_t>(boundary_count), L' ');
-                        const std::size_t to_delete = prev_word.size() + boundary_count;
-                        if (replace_text(to_delete, converted + spaces)) {
-                            switch_layout(target);
-                            screen_text = converted + spaces;
-                            alternate_text = original + spaces;
-                            screen_layout = target;
-                            alternate_layout = source;
-                            undo_available = true;
-                            prev_word.clear();
-                            boundary_count = 0;
-                            if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
-                            return;
-                        }
-                    }
-                }
             }
+            case TriggerAction::BufferedLine: {
+                if (convert_buffered_line()) return;
+                break;
+            }
+            case TriggerAction::BufferedWord: {
+                if (convert_buffered_word()) return;
+                break;
+            }
+            case TriggerAction::SystemLine: {
+                convert_line();
+                return;
+            }
+            case TriggerAction::SelectedText:
+            default:
+                break;
         }
 
-        // Case C: Try selection conversion
+        // Fallback for Word mode when word is empty but was just ended with space
+        if (scope == ConversionScope::Word && buffer.is_empty() && !prev_word.empty() &&
+            boundary_count > 0 && word_owner == foreground) {
+            if (convert_prev_word_boundary()) return;
+        }
+
+        // Fallback: try selection conversion
         if (convert_selection(true)) {
             if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
             return;
         }
 
-        // Case D: Buffer is empty and nothing is selected -> SWITCH LAYOUT DIRECTLY!
-        // This ensures pressing the key ALWAYS performs a meaningful action.
+        // Fallback: if nothing selected and buffer is empty, switch layout directly!
         const HKL source = current_layout();
         const HKL target = target_layout(source);
         if (source && target) {
@@ -1056,12 +1138,18 @@ struct Engine::Impl {
         if (!enabled) return;
         restore_target_focus(last_foreground, message_window);
         if (is_protected_foreground()) return;
+
+        // 1. If we have a buffered line from continuous typing, convert it!
+        if (!buffer.is_line_empty()) {
+            if (convert_buffered_line()) return;
+        }
+
         clear_all();
 
-        // 1. If text was already selected (e.g. user selected it with mouse), convert selection
+        // 2. If text was already selected (e.g. user selected it with mouse), convert selection
         if (convert_selection(true)) return;
 
-        // 2. Select current line (Home -> Shift+End)
+        // 3. Select current line (Home -> Shift+End)
         if (!send_line_selection()) return;
         Sleep(30);
 
@@ -1081,13 +1169,13 @@ struct Engine::Impl {
         if (is_protected_foreground()) return;
 
         const HWND foreground = GetForegroundWindow();
-        if (!word.empty() && word_owner && word_owner == foreground) {
+        if (!buffer.is_empty() && word_owner && word_owner == foreground) {
             const HKL layout = current_layout();
             std::wstring original;
-            if (translate_keys(word, word.size(), layout, original) && !original.empty()) {
+            if (translate_keys(buffer.current_word(), buffer.current_word().size(), layout, original) && !original.empty()) {
                 std::wstring next = next_case(original);
                 if (next != original) {
-                    if (replace_text(word.size(), next)) {
+                    if (replace_text(buffer.current_word().size(), next)) {
                         clear_all();
                         return;
                     }

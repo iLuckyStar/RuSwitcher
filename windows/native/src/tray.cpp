@@ -23,7 +23,8 @@ constexpr UINT kCommandSettings = 109;
 constexpr UINT kCommandAbout = 110;
 constexpr UINT kCommandExit = 111;
 constexpr UINT kCommandScopeWord = 112;
-constexpr UINT kCommandScopeLine = 113;
+constexpr UINT kCommandScopePhrase = 113;
+constexpr UINT kCommandScopeLine = 116;
 constexpr UINT kCommandWordEndEnterTab = 114;
 constexpr UINT kCommandPerAppLayout = 115;
 
@@ -109,11 +110,13 @@ struct Tray::Impl {
         AppendMenuW(menu, checked(engine.enabled()), kCommandEnabled, L"Включено");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
-        // Scope submenu (Whole line vs Word / Selection)
-        AppendMenuW(scope_menu, checked(!settings.convert_whole_line()),
-                    kCommandScopeWord, L"Последнее слово / выделенный текст (стандартно)");
-        AppendMenuW(scope_menu, checked(settings.convert_whole_line()),
-                    kCommandScopeLine, L"Вся строка целиком (Shift+Home)");
+        // Scope submenu
+        AppendMenuW(scope_menu, checked(settings.conversion_scope() == ConversionScope::Word),
+                    kCommandScopeWord, L"Последнее слово / выделенный текст");
+        AppendMenuW(scope_menu, checked(settings.conversion_scope() == ConversionScope::Phrase),
+                    kCommandScopePhrase, L"Набранная фраза / строка (как в Punto Switcher)");
+        AppendMenuW(scope_menu, checked(settings.conversion_scope() == ConversionScope::SystemLine),
+                    kCommandScopeLine, L"Вся строка целиком от начала (Home → End)");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(scope_menu), L"Область конвертации");
 
         // Trigger submenu (conversion hotkey)
@@ -216,9 +219,11 @@ struct Tray::Impl {
         } else if (id == kCommandFixNumbers) {
             settings.set_fix_numbers(!settings.fix_numbers());
         } else if (id == kCommandScopeWord) {
-            settings.set_convert_whole_line(false);
+            settings.set_conversion_scope(ConversionScope::Word);
+        } else if (id == kCommandScopePhrase) {
+            settings.set_conversion_scope(ConversionScope::Phrase);
         } else if (id == kCommandScopeLine) {
-            settings.set_convert_whole_line(true);
+            settings.set_conversion_scope(ConversionScope::SystemLine);
         } else if (id == kCommandSound) {
             settings.set_sound_on_switch(!settings.sound_on_switch());
         } else if (id == kCommandLine) {

@@ -11,6 +11,7 @@ constexpr UINT kTriggerMessage = WM_APP + 1;
 constexpr UINT kBoundaryMessage = WM_APP + 3;
 constexpr UINT kSwitchMessage = WM_APP + 4;
 constexpr UINT kCaseMessage = WM_APP + 5;
+constexpr UINT kLineMessage = WM_APP + 6;
 
 ruswitcher::Engine* g_engine{};
 ruswitcher::Tray* g_tray{};
@@ -30,6 +31,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     }
     if (message == kCaseMessage && g_engine) {
         g_engine->change_case();
+        return 0;
+    }
+    if (message == kLineMessage && g_engine) {
+        g_engine->convert_line();
         return 0;
     }
     LRESULT result{};

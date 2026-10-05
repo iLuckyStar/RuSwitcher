@@ -127,8 +127,9 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             create_label(hwnd, inst, L"Область конвертации:", 16, y + 4, 210, 20, font);
             ctx->cb_scope = create_combo(hwnd, inst, IDC_COMBO_SCOPE, 230, y, 200, 200, font);
             SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Последнее слово / выделение"));
-            SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся строка целиком (Shift+Home)"));
-            SendMessageW(ctx->cb_scope, CB_SETCURSEL, ctx->settings.convert_whole_line() ? 1 : 0, 0);
+            SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Набранная фраза (как в Punto)"));
+            SendMessageW(ctx->cb_scope, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Вся строка целиком (Home → End)"));
+            SendMessageW(ctx->cb_scope, CB_SETCURSEL, static_cast<WPARAM>(ctx->settings.conversion_scope()), 0);
 
             y += 40;
             ctx->chk_autoconvert = create_checkbox(hwnd, inst, IDC_CHK_AUTOCONVERT,
@@ -211,7 +212,7 @@ LRESULT CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
                     ctx->settings.set_fix_two_caps(SendMessageW(ctx->chk_twocaps, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_fix_numbers(SendMessageW(ctx->chk_numbers, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     int sc_sel = static_cast<int>(SendMessageW(ctx->cb_scope, CB_GETCURSEL, 0, 0));
-                    if (sc_sel >= 0) ctx->settings.set_convert_whole_line(sc_sel == 1);
+                    if (sc_sel >= 0 && sc_sel <= 2) ctx->settings.set_conversion_scope(static_cast<ConversionScope>(sc_sel));
                     ctx->settings.set_sound_on_switch(SendMessageW(ctx->chk_sound, BM_GETCHECK, 0, 0) == BST_CHECKED);
                     ctx->settings.set_autostart(SendMessageW(ctx->chk_autostart, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
