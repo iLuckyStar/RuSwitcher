@@ -1,39 +1,38 @@
-# RuSwitcher for Windows 0.10.0-beta.2 (macOS 3.5.0b Parity Release)
+### RuSwitcher for Windows v0.10.0-beta.2 (Native Win32 Edition)
 
-Windows build and feature update based on [rashn/RuSwitcher](https://github.com/rashn/RuSwitcher) (Rashid Sayfutdinov | [ruswitcher.app](https://ruswitcher.app)).
+Официальная чистая нативная сборка RuSwitcher для Windows на C++20 Win32 (`/MT`).  
+Сборки на .NET полностью упразднены: приложение теперь распространяется исключительно как легковесный автономный бинарник без внешних зависимостей (не требуется установка .NET Runtime или VC++ Redistributable).
 
-### Available Downloads:
-- **`RuSwitcher-0.10.0-beta.2-native-x64.zip` (~128 KB / 221 KB exe)** 🚀 *Recommended & Fastest*:
-  Ultra-lightweight native C++20 Win32 standalone binary with zero runtime dependencies (no .NET or VC++ runtimes required, statically linked `/MT`). Instant start, tiny RAM footprint, full Mac 3.5.0b feature parity.
-- **`RuSwitcher-0.10.0-beta.2-win-x64-compact.exe` (~313 KB)**:
-  C# .NET client for systems with .NET 8 / 9 / 10 Desktop Runtime installed.
-- **`RuSwitcher-0.10.0-beta.2-win-x64-standalone.zip` (~65 MB)**:
-  Full self-contained .NET bundle containing the complete embedded runtime.
+#### Нововведения и улучшения:
+- **Конвертация набранной фразы / строки в стиле Punto Switcher:**
+  - Реализован непрерывный буфер нажатий (`KeystrokeBuffer`) на основе канонической эталонной архитектуры `RuSwitcher.Win` и macOS `KeyboardMonitor`.
+  - При наборе одного, двух или нескольких слов (`ghbdtn vbh rfr ltkf`) программа сохраняет непрерывную цепочку ввода.
+  - По нажатию горячей клавиши конвертации переключается **именно то, что набрано последним** (`BufferedLine`), без деструктивного выделения `Home` → `Shift+End` и без затирания предыдущего текста в строке или консоли.
+  - При нажатии `Backspace` буфер динамически пересчитывает активное слово назад через пробелы (`rebuild_current_word`).
+- **Выбор области конвертации (в Настройках и Трей-меню):**
+  - *Последнее слово / выделенный текст* (`Word`)
+  - *Набранная фраза / строка (как в Punto Switcher)* (`Phrase`)
+  - *Вся строка целиком от начала (Home → End)* (`SystemLine`)
+- **Поддержка горячей клавиши Shift + Pause/Break:**
+  - Мгновенная конвертация набранной строки/фразы по аналогии с Punto Switcher.
+- **Полная синхронизация и защита данных:**
+  - Защита содержимого системного буфера обмена (`ClipboardSnapshot`).
+  - Исправление двух заглавных букв (`ПРивет` → `Привет`).
+  - Исправление опечаток в цифрах (`1ю8` → `1.8`).
+  - Авто-конвертация слов по словарю с поддержкой знаков препинания (например, `[jhjij` → `хорошо`, `rf;tncz` → `кажется`).
+  - Запоминание раскладки для каждого приложения (`PerAppLayoutManager`).
+  - Защита парольных полей, терминалов и утилит удалённого доступа.
+- **Чистый легковесный нативный бинарник:**
+  - Размер нативного `RuSwitcher.exe` всего ~247 КБ, компиляция `/MT` без внешних зависимостей.
 
-### Unified Features (macOS 3.5.0b & Windows):
-- **Full Hotkey & Trigger Configuration:**
-  - **Conversion Trigger:** Double-tap Ctrl, Double-tap Shift, Double-tap Alt, Caps Lock, or Pause/Break.
-  - **Instant Layout Switch Hotkey:** Dedicated key to immediately switch between Russian and English (Caps Lock, Double Shift, Double Ctrl, Double Alt, Pause/Break).
-  - **Caps Lock Interception:** Clean Punto/Mac-style CapsLock switching without toggling upper case mode!
-  - **Fallback Layout Switching:** Pressing trigger with empty buffer switches layout directly instead of doing nothing.
-  - **Previous Word Memory:** Pressing trigger after Space still converts the typed word and deletes trailing spaces.
-- **Native Settings Dialog:** Full Win32 settings window with hotkey selection, feature checkboxes, and layout pairs.
-- **Rich Tray Menu:** Active layout indicator (`⌨ Раскладка: Русский / English`), submenus for trigger, switch, and case keys.
-- **Word-End Pipeline:** Auto-conversion and text fixes trigger on **Enter** and **Tab** in addition to **Space**.
-- **Text Fixes (Typos & Formatting):**
-  - Two initial capitals correction (`ПРивет` → `Привет`, `TWo` → `Two`).
-  - Misplaced punctuation in numbers (`1ю8` → `1.8`, `5б2` → `5,2`).
-- **Brand & IT Term Recognition (Issue #34):**
-  - Built-in dictionary of 154 tech, AI, and developer brand names (`chatgpt`, `docker`, `github`, `kubernetes`, `vscode`, `gemini`, etc.).
-- **Change-Case Hotkey (Issue #29, macOS 3.3.0 parity):**
-  - Cycles case: `lower` → `UPPER` → `Title` → `lower` for the last typed word or selection.
+#### Доступные файлы для загрузки:
+- **`RuSwitcher-0.10.0-beta.2-native-x64.zip` (~139 КБ)** — zip-архив с исполняемым файлом.
+- **`RuSwitcher-0.10.0-beta.2-native-x64.exe` (~247 КБ)** — исполняемый файл (готовый к запуску).
+- **`RuSwitcher.exe` (~247 КБ)** — бинарник для прямой замены.
 
-### Checksums (SHA-256):
+#### Контрольные суммы (SHA256):
 ```
-57BACA52C74D6985FC9D74112711B68739584C6A331E3C6906C714ED8F657EA2  RuSwitcher-0.10.0-beta.2-native-x64.exe
-01E7FB1C90DD7095D32732D0ECCEC93B357330AA4D4C5239A7CABC4014AF606A  RuSwitcher-0.10.0-beta.2-native-x64.zip
-31dc6467cde8da3ad6b873334feeb8a0bfdefaa8afbebf83daf6b6d9124d9d41  RuSwitcher-0.10.0-beta.2-win-x64-compact.exe
-4e1abb274722d3a10c015d36273b59dc473a26f38fa6dd700b1610cf567b8d2e  RuSwitcher-0.10.0-beta.2-win-x64-compact.zip
-491a1c323cff663cde62bc8a51ec92ae67a9bcea1df137f71ad0000e200ec1a4  RuSwitcher-0.10.0-beta.2-win-x64-standalone.exe
-25377fc1eb26c19ea877960bff695b7e81f3985ad0195b21f2372feb6f5b9f47  RuSwitcher-0.10.0-beta.2-win-x64-standalone.zip
+b78a9f6a9de21a67fb9e6246ac28e7c3909a8648e43e7dd1ea0abaac6d8756ab  RuSwitcher-0.10.0-beta.2-native-x64.exe
+68617e6d6d90ee39b01333f5a762796e1de3e44ec8336d108b699eee506b13ba  RuSwitcher-0.10.0-beta.2-native-x64.zip
+b78a9f6a9de21a67fb9e6246ac28e7c3909a8648e43e7dd1ea0abaac6d8756ab  RuSwitcher.exe
 ```
