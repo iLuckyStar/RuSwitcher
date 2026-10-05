@@ -222,17 +222,23 @@ bool send_copy_chord() noexcept {
 }
 
 void wait_for_modifiers_released() noexcept {
-    const ULONGLONG deadline = GetTickCount64() + 150;
+    const bool down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
+                      (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+    if (!down) return;
+
+    const ULONGLONG deadline = GetTickCount64() + 60;
     while (GetTickCount64() < deadline) {
-        const bool down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
-        if (!down) break;
-        Sleep(5);
+        const bool still_down = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
+                               (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+        if (!still_down) break;
+        Sleep(2);
     }
-    Sleep(10);
 }
 
 bool read_unicode_text(std::wstring& text) noexcept {
@@ -255,21 +261,9 @@ bool wait_for_text(DWORD initial_sequence, DWORD timeout_ms, std::wstring& text)
     const ULONGLONG deadline = GetTickCount64() + timeout_ms;
     while (GetTickCount64() < deadline) {
         if (GetClipboardSequenceNumber() != initial_sequence && read_unicode_text(text)) return true;
-        Sleep(10);
+        Sleep(3);
     }
     return false;
-}
-
-bool send_native_copy() noexcept {
-    const HWND foreground = GetForegroundWindow();
-    const DWORD thread = GetWindowThreadProcessId(foreground, nullptr);
-    GUITHREADINFO info{sizeof(info)};
-    const HWND focused = GetGUIThreadInfo(thread, &info) && info.hwndFocus ? info.hwndFocus
-                                                                          : foreground;
-    if (!focused) return false;
-    DWORD_PTR ignored{};
-    return SendMessageTimeoutW(focused, WM_COPY, 0, 0,
-                               SMTO_ABORTIFHUNG | SMTO_BLOCK, 100, &ignored) != 0;
 }
 
 }  // namespace
@@ -337,15 +331,36 @@ bool ClipboardSnapshot::restore() noexcept {
 bool copy_current_selection(std::wstring& text) noexcept {
     text.clear();
     wait_for_modifiers_released();
-    DWORD sequence = GetClipboardSequenceNumber();
-    if (send_native_copy() && wait_for_text(sequence, 120, text)) return true;
-
-    // Custom/Chromium/terminal controls often expose no useful focused HWND. Fall back to the
-    // same user-level copy command in every app, still without executable-name routing.
-    if (!clear_clipboard()) return false;
-    sequence = GetClipboardSequenceNumber();
+    const DWORD sequence = GetClipboardSequenceNumber();
     if (!send_copy_chord()) return false;
-    return wait_for_text(sequence, 180, text);
+    // 45ms timeout is ample for active apps to handle Ctrl+C, while exiting almost instantly if nothing is selected
+    return wait_for_text(sequence, 45, text);
+}
+
+bool paste_text(const std::wstring& text) noexcept {
+    if (!OpenClipboard(nullptr)) return false;
+    EmptyClipboard();
+    const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!handle) {
+        CloseClipboard();
+        return false;
+    }
+    void* ptr = GlobalLock(handle);
+    if (ptr) {
+        CopyMemory(ptr, text.c_str(), bytes);
+        GlobalUnlock(handle);
+        SetClipboardData(CF_UNICODETEXT, handle);
+    }
+    CloseClipboard();
+
+    const BYTE scan = static_cast<BYTE>(
+        MapVirtualKeyExW('V', MAPVK_VK_TO_VSC, GetKeyboardLayout(0)));
+    keybd_event(VK_LCONTROL, 0x1D, KEYEVENTF_EXTENDEDKEY, kInjectedMarker);
+    keybd_event('V', scan, 0, kInjectedMarker);
+    keybd_event('V', scan, KEYEVENTF_KEYUP, kInjectedMarker);
+    keybd_event(VK_LCONTROL, 0x1D, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, kInjectedMarker);
+    return true;
 }
 
 }  // namespace ruswitcher

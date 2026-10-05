@@ -23,5 +23,6 @@ private:
 };
 
 bool copy_current_selection(std::wstring& text) noexcept;
+bool paste_text(const std::wstring& text) noexcept;
 
 }  // namespace ruswitcher

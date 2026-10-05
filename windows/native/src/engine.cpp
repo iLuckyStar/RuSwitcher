@@ -170,12 +170,11 @@ void restore_target_focus(HWND target, HWND own_window = nullptr) noexcept {
         AttachThreadInput(current_tid, target_tid, FALSE);
     }
 
-    for (int i = 0; i < 30; ++i) {
+    for (int i = 0; i < 15; ++i) {
         HWND active = GetForegroundWindow();
         if (active == root || active == target) break;
-        Sleep(10);
+        Sleep(5);
     }
-    Sleep(50);
 }
 
 HKL current_layout() noexcept {
@@ -272,16 +271,16 @@ INPUT key_input(WORD vk, WORD scan, DWORD flags) noexcept {
 }
 
 bool send_line_selection() noexcept {
-    INPUT to_start[]{key_input(VK_HOME, 0, 0), key_input(VK_HOME, 0, KEYEVENTF_KEYUP)};
-    SendInput(static_cast<UINT>(std::size(to_start)), to_start, sizeof(INPUT));
-    Sleep(25);
-
-    INPUT select_to_end[]{key_input(VK_SHIFT, 0, 0),
-                          key_input(VK_END, 0, 0),
-                          key_input(VK_END, 0, KEYEVENTF_KEYUP),
-                          key_input(VK_SHIFT, 0, KEYEVENTF_KEYUP)};
-    return SendInput(static_cast<UINT>(std::size(select_to_end)), select_to_end, sizeof(INPUT)) ==
-           std::size(select_to_end);
+    INPUT inputs[]{
+        key_input(VK_HOME, 0, 0),
+        key_input(VK_HOME, 0, KEYEVENTF_KEYUP),
+        key_input(VK_SHIFT, 0, 0),
+        key_input(VK_END, 0, 0),
+        key_input(VK_END, 0, KEYEVENTF_KEYUP),
+        key_input(VK_SHIFT, 0, KEYEVENTF_KEYUP),
+    };
+    return SendInput(static_cast<UINT>(std::size(inputs)), inputs, sizeof(INPUT)) ==
+           std::size(inputs);
 }
 
 bool send_word_selection(bool to_left) noexcept {
@@ -298,7 +297,7 @@ bool send_word_selection(bool to_left) noexcept {
 
 bool has_letter(std::wstring_view text) noexcept {
     for (wchar_t c : text) {
-        if (iswalpha(c)) return true;
+        if (IsCharAlphaW(c)) return true;
     }
     return false;
 }
@@ -351,24 +350,14 @@ void switch_layout(HKL layout) noexcept {
     const HWND foreground = GetForegroundWindow();
     if (!foreground) return;
 
-    const DWORD current_thread = GetCurrentThreadId();
-    const DWORD target_thread = GetWindowThreadProcessId(foreground, nullptr);
-
     HWND target_wnd = foreground;
+    const DWORD target_thread = GetWindowThreadProcessId(foreground, nullptr);
     GUITHREADINFO gui{sizeof(gui)};
     if (GetGUIThreadInfo(target_thread, &gui) && gui.hwndFocus) {
         target_wnd = gui.hwndFocus;
     }
 
-    if (target_thread && target_thread != current_thread) {
-        if (AttachThreadInput(current_thread, target_thread, TRUE)) {
-            ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
-            AttachThreadInput(current_thread, target_thread, FALSE);
-        }
-    } else {
-        ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
-    }
-
+    ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
     PostMessageW(target_wnd, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
     if (target_wnd != foreground) {
         PostMessageW(foreground, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
@@ -376,19 +365,19 @@ void switch_layout(HKL layout) noexcept {
 }
 
 bool is_all_caps(std::wstring_view text) noexcept {
-    bool has_letter = false;
+    bool has_char = false;
     for (wchar_t c : text) {
-        if (iswalpha(c)) {
-            has_letter = true;
-            if (!iswupper(c)) return false;
+        if (IsCharAlphaW(c)) {
+            has_char = true;
+            if (!IsCharUpperW(c)) return false;
         }
     }
-    return has_letter;
+    return has_char;
 }
 
 bool looks_like_code(std::wstring_view text) noexcept {
     for (std::size_t i = 1; i < text.size(); ++i) {
-        if (iswupper(text[i])) return true;
+        if (IsCharUpperW(text[i])) return true;
     }
     bool latin = false;
     bool cyrillic = false;
@@ -407,7 +396,7 @@ bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
     if (typed.size() < 3) return false;
 
     for (wchar_t c : typed) {
-        if (!iswalpha(c) && c != L'\'' && c != L'\x2019') return false;
+        if (!IsCharAlphaW(c) && c != L'\'' && c != L'\x2019') return false;
     }
 
     if (!caps) {
@@ -415,17 +404,19 @@ bool should_auto_convert(std::wstring_view typed, std::wstring_view converted,
         if (looks_like_code(typed)) return false;
     }
 
-    std::wstring lower_converted;
-    lower_converted.reserve(converted.size());
-    for (wchar_t c : converted) lower_converted.push_back(static_cast<wchar_t>(towlower(c)));
+    std::wstring lower_converted(converted);
+    if (!lower_converted.empty()) {
+        CharLowerBuffW(lower_converted.data(), static_cast<DWORD>(lower_converted.size()));
+    }
 
     const bool target_is_brand = (converted.size() >= 4 && is_brand_word(lower_converted));
     const bool valid_target = target_is_brand || Dict::is_valid_word(lower_converted, target);
     if (!valid_target) return false;
 
-    std::wstring lower_typed;
-    lower_typed.reserve(typed.size());
-    for (wchar_t c : typed) lower_typed.push_back(static_cast<wchar_t>(towlower(c)));
+    std::wstring lower_typed(typed);
+    if (!lower_typed.empty()) {
+        CharLowerBuffW(lower_typed.data(), static_cast<DWORD>(lower_typed.size()));
+    }
 
     if (Dict::is_valid_word(lower_typed, source)) return false;
 
@@ -809,12 +800,12 @@ struct Engine::Impl {
             clipboard.restore();
             return false;
         }
-        if (!clipboard.restore()) {
+        if (!paste_text(converted)) {
+            clipboard.restore();
             return false;
         }
-        if (!replace_text(0, converted)) {
-            return false;
-        }
+        Sleep(20);
+        clipboard.restore();
 
         HKL final_target = target;
         wchar_t last_letter = 0;
@@ -1077,7 +1068,7 @@ struct Engine::Impl {
 
         // 2. Select current line (Home -> Shift+End)
         if (!send_line_selection()) return;
-        Sleep(60);
+        Sleep(30);
 
         if (!convert_selection(true)) {
             // Unselect on no-op so line does not stay highlighted
@@ -1114,8 +1105,9 @@ struct Engine::Impl {
         if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
             std::wstring next = next_case(selected);
             if (next != selected) {
-                if (clipboard.restore()) {
-                    replace_text(0, next);
+                if (paste_text(next)) {
+                    Sleep(20);
+                    clipboard.restore();
                     clear_all();
                     return;
                 }
@@ -1124,12 +1116,13 @@ struct Engine::Impl {
 
         // 2. Select the word to the left of caret (Ctrl+Shift+Left)
         if (send_word_selection(true)) {
-            Sleep(35);
+            Sleep(25);
             if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
                 std::wstring next = next_case(selected);
                 if (next != selected) {
-                    if (clipboard.restore()) {
-                        replace_text(0, next);
+                    if (paste_text(next)) {
+                        Sleep(20);
+                        clipboard.restore();
                         clear_all();
                         return;
                     }
@@ -1142,12 +1135,13 @@ struct Engine::Impl {
 
         // 3. Fallback: try selecting word to the right (if cursor was at start of word)
         if (send_word_selection(false)) {
-            Sleep(35);
+            Sleep(25);
             if (copy_current_selection(selected) && !selected.empty() && has_letter(selected)) {
                 std::wstring next = next_case(selected);
                 if (next != selected) {
-                    if (clipboard.restore()) {
-                        replace_text(0, next);
+                    if (paste_text(next)) {
+                        Sleep(20);
+                        clipboard.restore();
                         clear_all();
                         return;
                     }

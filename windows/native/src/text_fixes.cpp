@@ -8,18 +8,45 @@
 #include <unordered_map>
 
 namespace ruswitcher {
+namespace {
+
+bool is_alpha(wchar_t c) noexcept {
+    return IsCharAlphaW(c) != FALSE;
+}
+
+bool is_lower(wchar_t c) noexcept {
+    return IsCharLowerW(c) != FALSE;
+}
+
+bool is_upper(wchar_t c) noexcept {
+    return IsCharUpperW(c) != FALSE;
+}
+
+wchar_t to_upper(wchar_t c) noexcept {
+    wchar_t buf[2] = {c, 0};
+    CharUpperBuffW(buf, 1);
+    return buf[0];
+}
+
+wchar_t to_lower(wchar_t c) noexcept {
+    wchar_t buf[2] = {c, 0};
+    CharLowerBuffW(buf, 1);
+    return buf[0];
+}
+
+}  // namespace
 
 std::optional<std::wstring> fix_two_caps(std::wstring_view word, HKL layout, bool check_dict) {
     if (word.size() < 3) return std::nullopt;
 
     for (wchar_t c : word) {
-        if (!iswalpha(c)) return std::nullopt;
+        if (!is_alpha(c)) return std::nullopt;
     }
 
-    if (!iswupper(word[0]) || !iswupper(word[1])) return std::nullopt;
+    if (!is_upper(word[0]) || !is_upper(word[1])) return std::nullopt;
 
     for (std::size_t i = 2; i < word.size(); ++i) {
-        if (!iswlower(word[i])) return std::nullopt;
+        if (!is_lower(word[i])) return std::nullopt;
     }
 
     // Exclude English plural acronyms like "IDs", "PCs", "CDs"
@@ -27,16 +54,16 @@ std::optional<std::wstring> fix_two_caps(std::wstring_view word, HKL layout, boo
 
     std::wstring fixed;
     fixed.reserve(word.size());
-    fixed.push_back(static_cast<wchar_t>(towupper(word[0])));
+    fixed.push_back(to_upper(word[0]));
     for (std::size_t i = 1; i < word.size(); ++i) {
-        fixed.push_back(static_cast<wchar_t>(towlower(word[i])));
+        fixed.push_back(to_lower(word[i]));
     }
 
     if (check_dict) {
         std::wstring lower;
         lower.reserve(word.size());
         for (wchar_t c : word) {
-            lower.push_back(static_cast<wchar_t>(towlower(c)));
+            lower.push_back(to_lower(c));
         }
         const bool valid = is_brand_word(lower) || Dict::is_valid_word(lower, layout);
         if (!valid && Dict::is_available()) return std::nullopt;
@@ -66,7 +93,7 @@ std::optional<std::wstring> fix_number(const std::vector<TypedKey>& keys, std::w
         if (i > 0 && i + 1 < keys.size() &&
             (keys[i - 1].vk >= '0' && keys[i - 1].vk <= '9') &&
             (keys[i + 1].vk >= '0' && keys[i + 1].vk <= '9') &&
-            iswalpha(typed[i])) {
+            is_alpha(typed[i])) {
 
             std::array<BYTE, 256> state{};
             wchar_t output[8]{};
@@ -91,10 +118,10 @@ std::wstring next_case(std::wstring_view text) {
     bool all_upper = true;
 
     for (wchar_t c : text) {
-        if (iswalpha(c)) {
+        if (is_alpha(c)) {
             ++letter_count;
-            if (!iswlower(c)) all_lower = false;
-            if (!iswupper(c)) all_upper = false;
+            if (!is_lower(c)) all_lower = false;
+            if (!is_upper(c)) all_upper = false;
         }
     }
 
@@ -105,17 +132,17 @@ std::wstring next_case(std::wstring_view text) {
 
     if (all_lower) {
         for (wchar_t c : text) {
-            result.push_back(static_cast<wchar_t>(towupper(c)));
+            result.push_back(to_upper(c));
         }
     } else if (all_upper) {
         bool new_word = true;
         for (wchar_t c : text) {
-            if (iswalpha(c)) {
+            if (is_alpha(c)) {
                 if (new_word) {
-                    result.push_back(static_cast<wchar_t>(towupper(c)));
+                    result.push_back(to_upper(c));
                     new_word = false;
                 } else {
-                    result.push_back(static_cast<wchar_t>(towlower(c)));
+                    result.push_back(to_lower(c));
                 }
             } else {
                 result.push_back(c);
@@ -126,7 +153,7 @@ std::wstring next_case(std::wstring_view text) {
         }
     } else {
         for (wchar_t c : text) {
-            result.push_back(static_cast<wchar_t>(towlower(c)));
+            result.push_back(to_lower(c));
         }
     }
 
@@ -231,7 +258,7 @@ std::wstring convert_text_bidirectional(std::wstring_view text, HKL layout1, HKL
         for (const auto& [k, v] : backward) {
             auto it = map.find(k);
             if (it != map.end()) {
-                if (!iswalpha(it->second) && iswalpha(v)) {
+                if (!is_alpha(it->second) && is_alpha(v)) {
                     it->second = v;
                 }
             } else {
@@ -251,7 +278,7 @@ std::wstring convert_text_bidirectional(std::wstring_view text, HKL layout1, HKL
             if (map.find(L'Ё') == map.end()) map[L'Ё'] = L'~';
         } else {
             auto it = map.find(p.ru);
-            if (it == map.end() || (!iswalpha(it->second) && iswalpha(p.en))) {
+            if (it == map.end() || (!is_alpha(it->second) && is_alpha(p.en))) {
                 map[p.ru] = p.en;
             }
         }

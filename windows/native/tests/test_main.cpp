@@ -1,4 +1,5 @@
 #include <iostream>
+#undef NDEBUG
 #include <cassert>
 #include <string>
 
@@ -72,6 +73,11 @@ void test_next_case() {
 
     assert(next_case(L"123!@#") == L"123!@#");
 
+    const std::wstring mixed = L"llllllllllllllllддддддддддддддддllllllllддддддддддддlllllllllllllдддддllll";
+    const std::wstring res = next_case(mixed);
+    std::wcout << L"next_case(mixed) = " << res << std::endl;
+    assert(res == L"LLLLLLLLLLLLLLLLДДДДДДДДДДДДДДДДLLLLLLLLДДДДДДДДДДДДLLLLLLLLLLLLLДДДДДLLLL");
+
     std::cout << "[PASS] NextCase cycling tests\n";
 }
 
@@ -106,7 +112,7 @@ void test_fix_number() {
 void test_convert_text_bidirectional() {
     // 1. Exact string from user report:
     const std::wstring mixed = L"llllllllllllllllддддддддддддддддllllllllддддддддддддlllllllllllllдддддllll";
-    const std::wstring expected = L"ддддддддддддддддllllllllllllllllддддддддllllllllllllдддддддддддддllllldddd";
+    const std::wstring expected = L"ддддддддддддддддllllllllllllllllддддддддllllllllllllдддддддддддддlllllдддд";
     const std::wstring actual = convert_text_bidirectional(mixed);
     assert(actual == expected);
 
@@ -124,7 +130,7 @@ void test_convert_text_bidirectional() {
     assert(convert_text_bidirectional(L"Ghbdtn Vbh!") == L"Привет Мир!");
 
     // 6. Mixed sentence (macOS parity issue #22A)
-    assert(convert_text_bidirectional(L"ghtlkj d ьшчув") == L"продол в mixed");
+    assert(convert_text_bidirectional(L"ghtlkj d ьшчув") == L"предло в mixed");
 
     std::cout << "[PASS] Bidirectional conversion tests (including user's mixed string)\n";
 }
