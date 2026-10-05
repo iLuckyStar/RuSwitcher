@@ -17,7 +17,7 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
   - Resolved regression where Russian words containing letters situated on punctuation keys (`х` on `[`, `ъ` on `]`, `ж` on `;`, `э` on `'`, `б` on `,`, `ю` on `.`, `ё` on `` ` ``) failed auto-conversion (e.g. `[jhjij` $\to$ `хорошо`, `rf;tncz` $\to$ `кажется`).
   - Generalized heuristic: allows auto-conversion whenever either the typed text or the converted target consists entirely of valid letters.
 - **💾 Per-App Keyboard Layout Memory (Запоминание раскладки для каждого приложения):**
-  - Full parity with macOS `PerAppLayoutManager.swift` and C# `AppLayoutTracker.cs`.
+  - Full parity with macOS `PerAppLayoutManager.swift` and Windows `AppLayoutTracker`.
   - Remembers the active keyboard layout for each process and restores it automatically upon regaining focus.
   - Safely ignores remote desktop sessions (`mstsc.exe`, `anydesk.exe`, `teamviewer.exe`) so the remote session controls layout natively.
   - Fully configurable via Settings Dialog and Tray context menu.
@@ -55,7 +55,7 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
   - Added checkboxes for Two-Caps correction, Number punctuation correction, and Enter/Tab word-end pipeline.
   - Added Change-Case hotkey configuration in Settings.
   - Full localization in Russian and English.
-- **Ultra-Lightweight Native C++ Engine (`windows/native`, ~221 KB):**
+- **Ultra-Lightweight Native x64 C++ Engine (`windows/native`, ~247 KB):**
   - Full unification of macOS 3.5.0b algorithmic capabilities and Windows usability:
     - **Full Hotkey & Trigger Configuration:**
       - Conversion trigger: Double-tap Ctrl, Double-tap Shift, Double-tap Alt, Caps Lock, or Pause/Break.
@@ -63,8 +63,8 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
       - **Caps Lock Interception:** Punto/Mac-style single-tap CapsLock switching without toggling upper case mode!
       - **Fallback Layout Switching:** Pressing trigger with empty buffer switches layout directly instead of doing nothing.
       - **Previous Word Memory:** Pressing trigger after Space still converts the typed word and deletes trailing spaces (macOS `prevWordKeys` parity).
-      - **Robust Win32 Layout Switching:** Multi-target dispatch (`AttachThreadInput` + `ActivateKeyboardLayout` + `WM_INPUTLANGCHANGEREQUEST` to focused control).
-    - **Native Win32 Settings Window (`SettingsDialog`):** Full graphical settings dialog with comboboxes, checkboxes, and layout selectors.
+      - **Robust Layout Switching (x64):** Multi-target dispatch (`AttachThreadInput` + `ActivateKeyboardLayout` + `WM_INPUTLANGCHANGEREQUEST` to focused control).
+    - **Native x64 Settings Window (Win32 GUI `SettingsDialog`):** Full graphical settings dialog with comboboxes, checkboxes, and layout selectors.
     - **Rich System Tray Presence:** Active layout indicator (`⌨ Раскладка: Русский / English`), trigger and switch submenus.
     - Zero-allocation binary search lookup for all 154 brand words (`brand_words.h`).
     - Two-caps correction and number punctuation fix (`text_fixes.cpp`).
@@ -72,9 +72,16 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
     - Asynchronous Word-End pipeline triggered on Space, Enter, and Tab.
     - Defensive integration with Windows Spell Checking API (`ISpellCheckerFactory` in `dict.cpp`).
     - Native pure-logic test suite (`RuSwitcherNativeTests.exe`).
-    - Binary size: only **221 KB** (128 KB zipped), statically compiled with `/MT` and `/O1 /Os /GL /LTCG` — zero runtime dependencies!
-- **Modern .NET Compatibility:**
-  - Configured `<RollForward>LatestMajor</RollForward>` allowing out-of-the-box execution on .NET 8, .NET 9, and .NET 10 runtimes.
+    - Binary size: only **247 KB** (139 KB zipped), statically compiled for x64 with `/MT` and `/O1 /Os /GL /LTCG` — zero runtime dependencies!
+- **⌨️ Punto Switcher Phrase & Continuous Line Conversion (Буферизация фразы/строки):**
+  - Integrated canonical continuous keystroke buffer (`KeystrokeBuffer`) tracking multi-word typing (`ghbdtn vbh rfr ltkf`).
+  - Hotkey conversion targets the exact typed phrase (`BufferedLine`) without destructive `Home` $\to$ `Shift+End` selection or wiping console history.
+  - Dynamic backward word reconstruction on Backspace (`rebuild_current_word`).
+  - 3-scope conversion: Word (`Word`), Phrase (`Phrase`), and System Line (`SystemLine`), configurable in Settings and Tray.
+  - Added `Shift + Pause/Break` hotkey for instant phrase conversion.
+- **Complete Retirement of .NET Builds & Migration to Pure Native x64:**
+  - Fully decommissioned and removed legacy .NET 8/9/10 assemblies and standalone packages (~160+ MB bloat).
+  - Windows distribution is now 100% native C++20 (`/MT`, x64), ultra-fast, zero-dependency, and only ~247 KB in size.
 
 ---
 
@@ -82,7 +89,7 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
 
 ### Initial Native & Parity Release by [rashn](https://github.com/rashn)
 - **SendInput ABI Fix:** Sized the Win32 `INPUT` union to 40 bytes on x64 (including `MOUSEINPUT`), fixing the critical bug where SendInput was silently rejected by Windows.
-- **Compact Native C++ Core (`windows/native`):** Experimental zero-dependency Win32 implementation under 2 MB.
+- **Native x64 C++ Core (`windows/native`):** Zero-dependency native 64-bit implementation under 2 MB.
 - **Capability-Based Routing:** Conversion mechanism routed by field capabilities and state, not process name allowlists.
 - **Smart Selection Conversion:** Retains valid words and only flips gibberish using `ISpellChecker`.
 - **Whole-Line Conversion (Issue #24):** Convert the entire typed line or selection via Shift+Home.
@@ -96,7 +103,7 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
 
 ### Initial Windows Port Beta by [rashn](https://github.com/rashn)
 - First public beta of RuSwitcher for Windows.
-- Implemented in C# (.NET 8 WinForms + P/Invoke).
+- Historical prototype implemented in C# (.NET 8 WinForms + P/Invoke); fully superseded by native x64 C++20 in 0.10.0.
 - Manual trigger (double-tap Ctrl, double-tap Shift, Pause/Break).
 - System tray icon with layout indicator and Settings window.
 - Basic auto-conversion and exception lists.

@@ -55,7 +55,7 @@ jobs:
           "prerelease=$pre" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "version=$v numeric_version=$numericVersion prerelease=$pre"
 
-      - name: Configure and build compact native binaries
+      - name: Configure and build native binaries (x64 and ARM64)
         shell: pwsh
         run: |
           cmake -S windows/native -B build/native-x64 -A x64 `

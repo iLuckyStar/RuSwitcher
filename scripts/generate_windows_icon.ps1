@@ -16,33 +16,38 @@ $entries = foreach ($image in $images) {
     [pscustomobject]@{ Size = $image.Size; Bytes = [IO.File]::ReadAllBytes($path) }
 }
 
-$destination = Join-Path $RepositoryRoot 'windows/src/RuSwitcher.Win/Assets/RuSwitcher.ico'
-[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
-$stream = [IO.File]::Create($destination)
-$writer = [IO.BinaryWriter]::new($stream)
-try {
-    $writer.Write([uint16]0) # reserved
-    $writer.Write([uint16]1) # icon
-    $writer.Write([uint16]$entries.Count)
+$destinations = @(
+    (Join-Path $RepositoryRoot 'windows/native/assets/RuSwitcher.ico'),
+    (Join-Path $RepositoryRoot 'windows/src/RuSwitcher.Win/Assets/RuSwitcher.ico')
+)
+foreach ($destination in $destinations) {
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+    $stream = [IO.File]::Create($destination)
+    $writer = [IO.BinaryWriter]::new($stream)
+    try {
+        $writer.Write([uint16]0) # reserved
+        $writer.Write([uint16]1) # icon
+        $writer.Write([uint16]$entries.Count)
 
-    $offset = 6 + (16 * $entries.Count)
-    foreach ($entry in $entries) {
-        $dimension = if ($entry.Size -eq 256) { 0 } else { $entry.Size }
-        $writer.Write([byte]$dimension)
-        $writer.Write([byte]$dimension)
-        $writer.Write([byte]0) # palette
-        $writer.Write([byte]0) # reserved
-        $writer.Write([uint16]1)
-        $writer.Write([uint16]32)
-        $writer.Write([uint32]$entry.Bytes.Length)
-        $writer.Write([uint32]$offset)
-        $offset += $entry.Bytes.Length
+        $offset = 6 + (16 * $entries.Count)
+        foreach ($entry in $entries) {
+            $dimension = if ($entry.Size -eq 256) { 0 } else { $entry.Size }
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]0) # palette
+            $writer.Write([byte]0) # reserved
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]32)
+            $writer.Write([uint32]$entry.Bytes.Length)
+            $writer.Write([uint32]$offset)
+            $offset += $entry.Bytes.Length
+        }
+        foreach ($entry in $entries) { $writer.Write($entry.Bytes) }
     }
-    foreach ($entry in $entries) { $writer.Write($entry.Bytes) }
-}
-finally {
-    $writer.Dispose()
-    $stream.Dispose()
+    finally {
+        $writer.Dispose()
+        $stream.Dispose()
+    }
 }
 
 Write-Output $destination

@@ -46,20 +46,20 @@ Edge, ChatGPT/Codex, WinForms and Windows Terminal remain the regression matrix,
 | NSStatusItem | `Shell_NotifyIcon` |
 | per-app frontmost observer | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` |
 
-## Build & test (Native Win32 C++20)
+## Build & test (Native x64 C++20)
 
-Официальная сборка RuSwitcher для Windows является полностью автономным нативным C++20 приложением (`/MT`) без рантайм-зависимостей.
+Официальная сборка RuSwitcher для Windows является полностью автономным нативным 64-битным C++20 приложением (`/MT`, x64) с использованием Windows API (Win32) без внешних рантайм-зависимостей. Сборки на базе .NET полностью упразднены.
 
 ```powershell
-# Сборка нативного приложения и тестов через CMake (MSVC)
-cmake -B windows/native/build -S windows/native -DCMAKE_BUILD_TYPE=Release
+# Сборка нативного приложения x64 и тестов через CMake (MSVC)
+cmake -B windows/native/build -S windows/native -A x64 -DCMAKE_BUILD_TYPE=Release
 cmake --build windows/native/build --config Release
 
 # Запуск тестов
 .\windows\native\build\Release\RuSwitcherNativeTests.exe
 ```
 
-Итоговый бинарник `RuSwitcher.exe` занимает всего ~247 КБ и не требует .NET или VC++ Redistributable.
+Итоговый бинарник `RuSwitcher.exe` скомпилирован под x64, занимает всего ~247 КБ и не требует .NET Runtime или VC++ Redistributable.
 
 ## Distribution
 

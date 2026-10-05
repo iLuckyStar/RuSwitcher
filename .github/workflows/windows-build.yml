@@ -1,77 +1,48 @@
 name: windows-build
 
-# Builds the Windows version on a real Windows runner — the only way to verify it,
-# since the maintainer works on macOS. Also the project's first build CI (the audit
-# flagged that pushes were never compile-checked).
+# Builds and tests the native Windows version (x64 and ARM64) on a real Windows runner.
 on:
   push:
     branches: [wip/windows, windows-port, main]
     paths:
-      - 'windows/**'
+      - 'windows/native/**'
       - 'scripts/check_windows_binary_size.ps1'
       - '.github/workflows/windows-build.yml'
   pull_request:
     paths:
-      - 'windows/**'
+      - 'windows/native/**'
       - 'scripts/check_windows_binary_size.ps1'
   workflow_dispatch:
 
 jobs:
-  native-size:
+  build-native:
     runs-on: windows-latest
     strategy:
       matrix:
         architecture: [x64, ARM64]
     steps:
       - uses: actions/checkout@v4
-      - name: Configure compact native target
+
+      - name: Configure native target (${{ matrix.architecture }})
         run: cmake -S windows/native -B build/native-${{ matrix.architecture }} -A ${{ matrix.architecture }}
-      - name: Build compact native target
+
+      - name: Build native target (${{ matrix.architecture }})
         run: cmake --build build/native-${{ matrix.architecture }} --config Release
+
       - name: Run native unit tests (x64)
         if: matrix.architecture == 'x64'
         run: build/native-${{ matrix.architecture }}/Release/RuSwitcherNativeTests.exe
 
-      - name: Enforce standalone executable budget
+      - name: Enforce executable size budget
         shell: pwsh
         run: >
           pwsh -NoProfile -ExecutionPolicy Bypass
           -File scripts/check_windows_binary_size.ps1
           build/native-${{ matrix.architecture }}/Release/RuSwitcher.exe -MaximumMiB 5
-      - name: Upload compact native executable
+
+      - name: Upload native executable
         uses: actions/upload-artifact@v4
         with:
-          name: RuSwitcher-native-${{ matrix.architecture }}
+          name: RuSwitcher-${{ matrix.architecture }}
           path: build/native-${{ matrix.architecture }}/Release/RuSwitcher.exe
-          if-no-files-found: error
-
-  build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Build (Release)
-        run: dotnet build windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj -c Release --nologo
-
-      - name: Test (pure-logic unit tests)
-        run: dotnet test windows/tests/RuSwitcher.Win.Tests/RuSwitcher.Win.Tests.csproj -c Release --nologo
-
-      # Self-contained single .exe — runs on any Windows x64 without installing .NET.
-      # Download it from this run's "Artifacts" section to test on a real machine.
-      - name: Publish single-file exe
-        run: >
-          dotnet publish windows/src/RuSwitcher.Win/RuSwitcher.Win.csproj
-          -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -o publish --nologo
-
-      - name: Upload exe artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RuSwitcher-win-x64
-          path: publish/RuSwitcher.exe
           if-no-files-found: error

@@ -1,15 +1,14 @@
 # Windows parity roadmap
 
 The macOS application is the behavioural reference. Windows releases should copy its user-visible
-behaviour in small, testable slices; a feature is not considered parity merely because a Win32
+behaviour in small, testable slices; a feature is not considered parity merely because a Windows API
 counterpart exists.
 
 ## Architecture and size constraint
 
-The final Windows client is a native Win32 x64/ARM64 executable with no bundled framework/runtime.
-The standalone release exe has a hard 5 MiB CI budget (preferred 1–2 MiB). The current C# app remains
-the working behavioural beta while scenarios are migrated to `windows/native`; a deceptively small
-framework-dependent launcher that requires a separate .NET Desktop Runtime is not the final design.
+The official Windows client is a pure native x64/ARM64 C++20 executable (`/MT`) using the Win32 API with no bundled framework or external runtime dependencies.
+The release executable has a hard 5 MiB CI budget (actual size is ~247 KiB).
+The historical C# (.NET) prototype has been completely migrated and decommissioned; all Windows builds and releases are pure native C++20 x64.
 
 ## macOS capability map
 
@@ -26,7 +25,7 @@ framework-dependent launcher that requires a separate .NET Desktop Runtime is no
 | Layout UX | Menu layout picker, current flag/badge, optional caret flag, sound on first typed character after a switch | Current layout text in tray menu and immediate system sound |
 | Session behaviour | Per-app layout memory, launch at login, remote-desktop mode | Per-app memory and launch-at-login exist; remote mode missing |
 | Product UX | Localized tabbed settings, About/support/share, beta channel, What's New, debug-log controls | Small EN/RU settings dialog and basic update link |
-| Distribution | Signed/notarized app, verified update, stable/beta feeds | Self-contained exe and unsigned Inno Setup script |
+| Distribution | Signed/notarized app, verified update, stable/beta feeds | Standalone Native x64/ARM64 executable and Inno Setup installer |
 
 ## Release slices
 

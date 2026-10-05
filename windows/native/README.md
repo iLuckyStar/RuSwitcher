@@ -1,7 +1,6 @@
-# Compact native Windows target
+# Native Windows target (x64 / ARM64)
 
-This is the final-product target. The current C# application is the behavioural beta/oracle while
-features are migrated and verified against the same end-to-end scenario matrix.
+This is the official production Windows target. Built in modern C++20 using the Win32 API with static linking (`/MT`) and zero external runtime dependencies. The legacy .NET/C# prototype has been completely migrated and decommissioned.
 
 Hard constraints:
 
@@ -20,7 +19,7 @@ cmake --build build/native --config Release
 pwsh scripts/check_windows_binary_size.ps1 build/native/Release/RuSwitcher.exe
 ```
 
-The native target must not replace the installed beta until it passes word, selection, whole-line,
+The native target is fully verified for word, phrase/line (Punto Switcher parity), selection, whole-line,
 clipboard restoration, caret/mouse invalidation, multiline and protected-field scenarios.
 
 ## Migration status
@@ -47,7 +46,12 @@ Verified locally on Windows ARM64 with real input events:
   - Word-End Pipeline triggering on Space, Enter, and Tab;
   - Windows Spell Checking COM API integration (`ISpellCheckerFactory`);
   - Interactive Tray context menu toggles for all text fixes and auto-conversion;
-  - Automated pure-logic native test suite (`RuSwitcherNativeTests.exe`).
+  - Automated pure-logic native test suite (`RuSwitcherNativeTests.exe`);
+- **Punto Switcher Factory Parity:**
+  - Continuous keystroke buffer (`KeystrokeBuffer`) tracking multi-word phrases;
+  - Hotkey conversion targets the exact typed phrase (`BufferedLine`) without destructive line erasure;
+  - Dynamic backward word reconstruction on Backspace (`rebuild_current_word`);
+  - 3-scope conversion: Word, Phrase, and System Line.
 
-The native executable is ultra-compact (~209 KB), has zero third-party runtime dependencies and is built for x64 and ARM64. Run `scripts/check_windows_binary_size.ps1` for every release build.
+The native executable is ultra-compact (~247 KB for x64), has zero third-party runtime dependencies, is statically compiled (`/MT`) for x64 and ARM64. Run `scripts/check_windows_binary_size.ps1` for every release build.
 

@@ -14,7 +14,11 @@ if(RUSWITCHER_VERSION MATCHES "-")
 else()
     set(RUSWITCHER_FILE_FLAGS "0x0L")
 endif()
-set(RUSWITCHER_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../src/RuSwitcher.Win/Assets/RuSwitcher.ico")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/RuSwitcher.ico")
+    set(RUSWITCHER_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/RuSwitcher.ico")
+else()
+    set(RUSWITCHER_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../src/RuSwitcher.Win/Assets/RuSwitcher.ico")
+endif()
 configure_file(src/resources.rc.in generated/resources.rc @ONLY)
 
 add_executable(RuSwitcherNative WIN32
