@@ -49,13 +49,14 @@ set_target_properties(RuSwitcherNative PROPERTIES
 enable_testing()
 add_executable(RuSwitcherNativeTests
     tests/test_main.cpp
+    src/clipboard.cpp
     src/dict.cpp
     src/text_fixes.cpp
 )
 target_compile_features(RuSwitcherNativeTests PRIVATE cxx_std_20)
 target_compile_definitions(RuSwitcherNativeTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(RuSwitcherNativeTests PRIVATE src)
-target_link_libraries(RuSwitcherNativeTests PRIVATE user32 ole32)
+target_link_libraries(RuSwitcherNativeTests PRIVATE user32 ole32 urlmon)
 if(MSVC)
     target_compile_options(RuSwitcherNativeTests PRIVATE /utf-8 /permissive- /W4)
     set_target_properties(RuSwitcherNativeTests PROPERTIES

@@ -804,7 +804,7 @@ struct Engine::Impl {
             clipboard.restore();
             return false;
         }
-        Sleep(20);
+        Sleep(30);
         clipboard.restore();
 
         HKL final_target = target;
@@ -1106,7 +1106,7 @@ struct Engine::Impl {
             std::wstring next = next_case(selected);
             if (next != selected) {
                 if (paste_text(next)) {
-                    Sleep(20);
+                    Sleep(30);
                     clipboard.restore();
                     clear_all();
                     return;
@@ -1121,7 +1121,7 @@ struct Engine::Impl {
                 std::wstring next = next_case(selected);
                 if (next != selected) {
                     if (paste_text(next)) {
-                        Sleep(20);
+                        Sleep(30);
                         clipboard.restore();
                         clear_all();
                         return;
@@ -1140,7 +1140,7 @@ struct Engine::Impl {
                 std::wstring next = next_case(selected);
                 if (next != selected) {
                     if (paste_text(next)) {
-                        Sleep(20);
+                        Sleep(30);
                         clipboard.restore();
                         clear_all();
                         return;

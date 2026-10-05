@@ -2,6 +2,7 @@
 #undef NDEBUG
 #include <cassert>
 #include <string>
+#include <ole2.h>
 
 #include "brand_words.h"
 #include "dict.h"
@@ -135,6 +136,77 @@ void test_convert_text_bidirectional() {
     std::cout << "[PASS] Bidirectional conversion tests (including user's mixed string)\n";
 }
 
+#include "clipboard.h"
+
+void test_clipboard_snapshot() {
+    OleInitialize(nullptr);
+
+    // 1. Put original text into clipboard
+    const std::wstring original = L"Secret User Data 12345";
+    assert(paste_text(original));
+
+    // 2. Read clipboard to verify
+    std::wstring read_back;
+    {
+        assert(OpenClipboard(nullptr));
+        HANDLE h = GetClipboardData(CF_UNICODETEXT);
+        assert(h != nullptr);
+        read_back = static_cast<const wchar_t*>(GlobalLock(h));
+        GlobalUnlock(h);
+        CloseClipboard();
+    }
+    assert(read_back == original);
+
+    // 3. Take snapshot
+    ClipboardSnapshot snapshot;
+    bool cap_ok = snapshot.capture();
+    std::cout << "snapshot.capture() = " << cap_ok << std::endl;
+    assert(cap_ok);
+
+    // 4. Overwrite clipboard with temporary converted text
+    const std::wstring converted = L"Temporary Converted Text";
+    assert(paste_text(converted));
+
+    // Verify it is indeed changed
+    {
+        assert(OpenClipboard(nullptr));
+        HANDLE h = GetClipboardData(CF_UNICODETEXT);
+        assert(h != nullptr);
+        read_back = static_cast<const wchar_t*>(GlobalLock(h));
+        GlobalUnlock(h);
+        CloseClipboard();
+    }
+    assert(read_back == converted);
+
+    // 5. Restore snapshot
+    assert(snapshot.restore());
+
+    // 6. Verify original text is restored
+    read_back.clear();
+    {
+        bool has_text = false;
+        if (OpenClipboard(nullptr)) {
+            if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+                HANDLE h = GetClipboardData(CF_UNICODETEXT);
+                if (h) {
+                    const wchar_t* ptr = static_cast<const wchar_t*>(GlobalLock(h));
+                    if (ptr) {
+                        read_back = ptr;
+                        GlobalUnlock(h);
+                        has_text = true;
+                    }
+                }
+            }
+            CloseClipboard();
+        }
+        assert(has_text);
+        assert(read_back == original);
+    }
+
+    std::cout << "[PASS] Clipboard snapshot save and restore test\n";
+    OleUninitialize();
+}
+
 int main() {
     std::cout << "Running RuSwitcher native unit tests...\n";
     test_brand_words();
@@ -142,6 +214,7 @@ int main() {
     test_next_case();
     test_fix_number();
     test_convert_text_bidirectional();
+    test_clipboard_snapshot();
     std::cout << "All native unit tests PASSED successfully!\n";
     return 0;
 }
