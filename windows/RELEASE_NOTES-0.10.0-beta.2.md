@@ -1,8 +1,8 @@
-# RuSwitcher for Windows 0.10.0-beta.2 (Native Win32 Parity Release)
+# RuSwitcher for Windows 0.10.0-beta.2 (Native x64 Parity Release)
 
 Windows build and feature update based on [rashn/RuSwitcher](https://github.com/rashn/RuSwitcher) (Rashid Sayfutdinov | [ruswitcher.app](https://ruswitcher.app)).
 
-> **Чистая нативная архитектура:** Сборки на .NET упразднены. Приложение распространяется исключительно как легковесный автономный C++20 Win32 бинарник (~247 КБ) со статической линковкой (`/MT`), без внешних зависимостей и без необходимости устанавливать .NET Runtime.
+> **Чистая нативная архитектура x64:** Сборки на .NET упразднены. Приложение распространяется исключительно как легковесный автономный 64-битный C++20 бинарник (~247 КБ) со статической линковкой (`/MT`, x64), без внешних зависимостей и без необходимости устанавливать .NET Runtime.
 
 ### Available Downloads:
 - **`RuSwitcher-0.10.0-beta.2-native-x64.zip` (~139 KB)** 🚀 *Рекомендуемая автономная сборка*:

@@ -1,6 +1,6 @@
-### RuSwitcher for Windows v0.10.0-beta.2 (Native Win32 Edition)
+### RuSwitcher for Windows v0.10.0-beta.2 (Native x64 Edition)
 
-Официальная чистая нативная сборка RuSwitcher для Windows на C++20 Win32 (`/MT`).  
+Официальная чистая нативная 64-битная сборка RuSwitcher для Windows на C++20 (`/MT`, x64).  
 Сборки на .NET полностью упразднены: приложение теперь распространяется исключительно как легковесный автономный бинарник без внешних зависимостей (не требуется установка .NET Runtime или VC++ Redistributable).
 
 #### Нововведения и улучшения:
