@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 project(RuSwitcherNative LANGUAGES CXX)
 
-set(RUSWITCHER_VERSION "0.10.0-beta.2" CACHE STRING "Display version embedded in RuSwitcher.exe")
-set(RUSWITCHER_VERSION_NUMERIC "0.10.0.2" CACHE STRING "Four-part numeric Windows version")
+set(RUSWITCHER_VERSION "0.10.0-beta.3" CACHE STRING "Display version embedded in RuSwitcher.exe")
+set(RUSWITCHER_VERSION_NUMERIC "0.10.0.3" CACHE STRING "Four-part numeric Windows version")
 
 if(NOT RUSWITCHER_VERSION_NUMERIC MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR "RUSWITCHER_VERSION_NUMERIC must contain four numeric components")
@@ -56,11 +56,12 @@ add_executable(RuSwitcherNativeTests
     src/clipboard.cpp
     src/dict.cpp
     src/text_fixes.cpp
+    src/input_safety.cpp
 )
 target_compile_features(RuSwitcherNativeTests PRIVATE cxx_std_20)
 target_compile_definitions(RuSwitcherNativeTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(RuSwitcherNativeTests PRIVATE src)
-target_link_libraries(RuSwitcherNativeTests PRIVATE user32 ole32 urlmon)
+target_link_libraries(RuSwitcherNativeTests PRIVATE user32 ole32 urlmon uiautomationcore)
 if(MSVC)
     target_compile_options(RuSwitcherNativeTests PRIVATE /utf-8 /permissive- /W4)
     set_target_properties(RuSwitcherNativeTests PROPERTIES

@@ -236,7 +236,7 @@ struct Tray::Impl {
             SettingsDialog::show(window, instance, engine, settings);
         } else if (id == kCommandAbout) {
             MessageBoxW(nullptr,
-                        L"RuSwitcher для Windows v0.10.0-beta.2\n\n"
+                        L"RuSwitcher для Windows v0.10.0-beta.3\n\n"
                         L"Единый функционал с флагманской версией macOS 3.5.0b:\n"
                         L"• Переключение раскладки: по Caps Lock, двойному Ctrl/Shift/Alt или Pause/Break.\n"
                         L"• Конвертация слова: на лету и по горячей клавише.\n"

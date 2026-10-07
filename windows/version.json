@@ -1,6 +1,6 @@
 {
-  "version": "0.10.0-beta.2",
-  "url": "https://github.com/iLuckyStar/RuSwitcher/releases/tag/win-v0.10.0-beta.2",
-  "notes": "Parity with macOS 3.5.0b: Word-end pipeline on Space/Enter/Tab, two-caps correction (ПРивет -> Привет), number separator fixes (1ю8 -> 1.8), built-in IT and tech brands dictionary (#34), Change-Case hotkey (#29).",
-  "sha256": "b78a9f6a9de21a67fb9e6246ac28e7c3909a8648e43e7dd1ea0abaac6d8756ab"
+  "version": "0.10.0-beta.3",
+  "url": "https://github.com/iLuckyStar/RuSwitcher/releases/tag/win-v0.10.0-beta.3",
+  "notes": "Console and terminal compatibility fix: restores reliable layout switching and manual conversion in PowerShell, CMD, and Windows Terminal via dynamic AttachThreadInput and decoupled process safety.",
+  "sha256": "86722ff8097ce350bfb04a11145d625bb75be8432ad3d66088c4b1385e8f1f8c"
 }

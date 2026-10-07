@@ -333,19 +333,30 @@ void switch_layout(HKL layout) noexcept {
     const HWND foreground = GetForegroundWindow();
     if (!foreground) return;
 
+    const DWORD current_tid = GetCurrentThreadId();
+    const DWORD target_tid = GetWindowThreadProcessId(foreground, nullptr);
+
     HWND target_wnd = foreground;
-    const DWORD target_thread = GetWindowThreadProcessId(foreground, nullptr);
     GUITHREADINFO gui{sizeof(gui)};
-    if (GetGUIThreadInfo(target_thread, &gui) && gui.hwndFocus) {
+    if (target_tid && GetGUIThreadInfo(target_tid, &gui) && gui.hwndFocus) {
         target_wnd = gui.hwndFocus;
     }
 
+    const bool attached = (current_tid != target_tid && target_tid != 0)
+        ? (AttachThreadInput(current_tid, target_tid, TRUE) != FALSE)
+        : false;
+
     ActivateKeyboardLayout(layout, KLF_SETFORPROCESS);
-    PostMessageW(target_wnd, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
+    PostMessageW(target_wnd, WM_INPUTLANGCHANGEREQUEST, 1, reinterpret_cast<LPARAM>(layout));
     if (target_wnd != foreground) {
-        PostMessageW(foreground, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(layout));
+        PostMessageW(foreground, WM_INPUTLANGCHANGEREQUEST, 1, reinterpret_cast<LPARAM>(layout));
+    }
+
+    if (attached) {
+        AttachThreadInput(current_tid, target_tid, FALSE);
     }
 }
+
 
 struct ModTracker {
     bool down{};
@@ -422,7 +433,7 @@ struct Engine::Impl {
         if (new_process.empty()) return;
 
         // Remote desktop clients: let remote host manage layout
-        if (new_process == L"mstsc.exe" || new_process == L"teamviewer.exe" || new_process == L"anydesk.exe") {
+        if (is_remote_desktop_process(new_process)) {
             return;
         }
 
@@ -431,7 +442,7 @@ struct Engine::Impl {
             HKL target = it->second;
             HKL current = GetKeyboardLayout(new_tid);
             if (target != current) {
-                PostMessageW(new_window, WM_INPUTLANGCHANGEREQUEST, 0, reinterpret_cast<LPARAM>(target));
+                switch_layout(target);
             }
         }
     }
@@ -832,6 +843,13 @@ struct Engine::Impl {
             return;
         }
 
+        const std::wstring proc_name = get_window_process_name(foreground);
+        if (is_auto_convert_denied(proc_name)) {
+            pending_boundary_word.clear();
+            pending_boundary_owner = nullptr;
+            return;
+        }
+
         const std::vector<TypedKey> keys = std::move(pending_boundary_word);
         const DWORD b_vk = pending_boundary_vk;
         pending_boundary_word.clear();
@@ -1146,10 +1164,23 @@ struct Engine::Impl {
 
         clear_all();
 
-        // 2. If text was already selected (e.g. user selected it with mouse), convert selection
+        // 2. Terminals do not support GUI line selection (Home -> Shift+End); fallback to direct layout switch
+        const HWND foreground = GetForegroundWindow();
+        const std::wstring proc_name = get_window_process_name(foreground);
+        if (is_terminal_process(proc_name)) {
+            const HKL source = current_layout();
+            const HKL target = target_layout(source);
+            if (source && target) {
+                switch_layout(target);
+                if (settings && settings->sound_on_switch()) MessageBeep(MB_OK);
+            }
+            return;
+        }
+
+        // 3. If text was already selected (e.g. user selected it with mouse), convert selection
         if (convert_selection(true)) return;
 
-        // 3. Select current line (Home -> Shift+End)
+        // 4. Select current line (Home -> Shift+End)
         if (!send_line_selection()) return;
         Sleep(30);
 
@@ -1198,6 +1229,13 @@ struct Engine::Impl {
                     return;
                 }
             }
+        }
+
+        const std::wstring proc_name = get_window_process_name(foreground);
+        if (is_terminal_process(proc_name)) {
+            // Terminals do not support GUI word selection via Ctrl+Shift+Left
+            clipboard.restore();
+            return;
         }
 
         // 2. Select the word to the left of caret (Ctrl+Shift+Left)

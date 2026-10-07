@@ -7,6 +7,26 @@ RuSwitcher is an open-source, lightweight, keyboard layout switcher and auto-cor
 
 ---
 
+## [0.10.0-beta.3] — 2026-10-07
+
+### 🖥️ Console & Terminal Compatibility Fix (PowerShell, CMD, Windows Terminal)
+*Dedicated update restoring seamless keyboard layout switching and text conversion in all Windows consoles and terminals.*
+
+#### Fixed & Improved
+- **🔀 Reliable Layout Switching in Console Windows (`conhost.exe` / `cmd.exe` / `powershell.exe`):**
+  - Resolved classic Win32 console subsystem limitation where `conhost.exe` silently ignores foreign unattached `PostMessageW(..., WM_INPUTLANGCHANGEREQUEST)` messages.
+  - Implemented dynamic, non-blocking `AttachThreadInput` scope around `ActivateKeyboardLayout(..., KLF_SETFORPROCESS)` and `WM_INPUTLANGCHANGEREQUEST(1, target_layout)` with immediate detachment.
+  - Layout switching in PowerShell, CMD, Windows Terminal, and MSYS/Git Bash now occurs instantaneously without dropped events or UI freezes.
+- **🛡️ Decoupled Process Safety Architecture (Factory-First with macOS Parity):**
+  - Separated `is_protected_foreground()` (strictly for password fields and password managers: `1password.exe`, `bitwarden.exe`, `keepass.exe`, `keepassxc.exe`) from `is_auto_convert_denied()` (terminals and code editors).
+  - Terminals (`windowsterminal.exe`, `cmd.exe`, `powershell.exe`, `pwsh.exe`, `conhost.exe`, `bash.exe`, `wsl.exe`, etc.) and code editors (`code.exe`, `devenv.exe`, `idea64.exe`, etc.) are now safely protected against *accidental automatic conversion* on Space/Enter/Tab, preventing command/code mangling.
+  - Manual triggers (`convert_or_undo`, Double Ctrl, Shift+Pause, Pause/Break, CapsLock) and layout switching are now fully operational in terminals.
+- **🛡️ Prompt Protection in Terminal Line & Case Conversion:**
+  - Prevented sending unsupported GUI selection sequences (`Home` $\to$ `Shift+End`, `Ctrl+Shift+Left`) to console windows which previously caused cursor drift or stray escape characters.
+  - Line conversion in console windows gracefully operates on typed buffer keystrokes (`VK_BACK` + Unicode typing) or performs direct layout switching.
+- **🔄 Upstream Synchronization:**
+  - Pulled and reconciled upstream daily snapshots (`4f16414`, `d66db17`).
+
 ## [0.10.0-beta.2] — 2026-10-05
 
 ### 🚀 macOS 3.5.0b Feature Parity & Windows Stability Update

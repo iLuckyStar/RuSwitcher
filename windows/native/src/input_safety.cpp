@@ -13,8 +13,19 @@ namespace {
 
 constexpr LONG_PTR kPasswordStyle = ES_PASSWORD;
 
-constexpr std::wstring_view kDeniedProcesses[] = {
-    // Terminals / Consoles (protect from backspace/synthetic typing corruption)
+// 1. Password Managers: Never inspect or modify input in credential managers
+constexpr std::wstring_view kPasswordManagers[] = {
+    L"1password.exe",
+    L"bitwarden.exe",
+    L"keepass.exe",
+    L"keepassxc.exe",
+    L"enpass.exe",
+    L"dashlane.exe"
+};
+
+// 2. Terminals and consoles: Protect from accidental auto-convert on Space/Enter/Tab.
+// Manual conversion (TriggerKey, Pause/Break, Shift+Pause, Double Ctrl) remains enabled!
+constexpr std::wstring_view kTerminalProcesses[] = {
     L"windowsterminal.exe",
     L"cmd.exe",
     L"powershell.exe",
@@ -26,15 +37,27 @@ constexpr std::wstring_view kDeniedProcesses[] = {
     L"alacritty.exe",
     L"wezterm-gui.exe",
     L"kitty.exe",
-    L"putty.exe",
+    L"putty.exe"
+};
 
-    // Password Managers (security boundary)
-    L"1password.exe",
-    L"bitwarden.exe",
-    L"keepass.exe",
-    L"keepassxc.exe",
+// 3. Code editors and IDEs: Protect code typing from accidental auto-convert on boundary
+constexpr std::wstring_view kCodeEditors[] = {
+    L"code.exe",
+    L"code - insiders.exe",
+    L"devenv.exe",
+    L"sublime_text.exe",
+    L"notepad++.exe",
+    L"cursor.exe",
+    L"idea64.exe",
+    L"pycharm64.exe",
+    L"clion64.exe",
+    L"webstorm64.exe",
+    L"rider64.exe",
+    L"studio64.exe"
+};
 
-    // Remote Desktop Clients (defer to remote host)
+// 4. Remote Desktop clients: Let remote machine manage layout and conversion
+constexpr std::wstring_view kRemoteDesktopProcesses[] = {
     L"mstsc.exe",
     L"teamviewer.exe",
     L"anydesk.exe"
@@ -85,21 +108,56 @@ std::wstring get_window_process_name(HWND window) noexcept {
     return name;
 }
 
-bool is_denied_process(std::wstring_view process_name) noexcept {
+bool is_password_manager(std::wstring_view process_name) noexcept {
     if (process_name.empty()) return false;
-    for (const auto& denied : kDeniedProcesses) {
-        if (process_name == denied) return true;
+    for (const auto& pm : kPasswordManagers) {
+        if (process_name == pm) return true;
     }
     return false;
+}
+
+bool is_terminal_process(std::wstring_view process_name) noexcept {
+    if (process_name.empty()) return false;
+    for (const auto& term : kTerminalProcesses) {
+        if (process_name == term) return true;
+    }
+    return false;
+}
+
+bool is_code_editor(std::wstring_view process_name) noexcept {
+    if (process_name.empty()) return false;
+    for (const auto& editor : kCodeEditors) {
+        if (process_name == editor) return true;
+    }
+    return false;
+}
+
+bool is_remote_desktop_process(std::wstring_view process_name) noexcept {
+    if (process_name.empty()) return false;
+    for (const auto& rdp : kRemoteDesktopProcesses) {
+        if (process_name == rdp) return true;
+    }
+    return false;
+}
+
+bool is_auto_convert_denied(std::wstring_view process_name) noexcept {
+    return is_terminal_process(process_name) ||
+           is_code_editor(process_name) ||
+           is_remote_desktop_process(process_name) ||
+           is_password_manager(process_name);
+}
+
+bool is_denied_process(std::wstring_view process_name) noexcept {
+    return is_auto_convert_denied(process_name);
 }
 
 bool is_protected_foreground() noexcept {
     const HWND foreground = GetForegroundWindow();
     if (!foreground) return false;
 
-    // 1. Check denied process policy (Terminals, Password Managers, Remote Desktop)
+    // 1. Check password manager processes
     const std::wstring proc_name = get_window_process_name(foreground);
-    if (is_denied_process(proc_name)) return true;
+    if (is_password_manager(proc_name)) return true;
 
     // 2. Check native Win32 ES_PASSWORD style
     const DWORD thread = GetWindowThreadProcessId(foreground, nullptr);

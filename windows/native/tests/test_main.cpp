@@ -6,6 +6,7 @@
 
 #include "brand_words.h"
 #include "dict.h"
+#include "input_safety.h"
 #include "keystroke_buffer.h"
 #include "text_fixes.h"
 
@@ -302,6 +303,45 @@ void test_trigger_routing() {
     std::cout << "[PASS] Trigger routing parity tests (Word / Phrase / SystemLine / Reconvert)\n";
 }
 
+void test_input_safety() {
+    // Terminals must be identified as terminals
+    assert(is_terminal_process(L"cmd.exe"));
+    assert(is_terminal_process(L"powershell.exe"));
+    assert(is_terminal_process(L"pwsh.exe"));
+    assert(is_terminal_process(L"windowsterminal.exe"));
+    assert(is_terminal_process(L"conhost.exe"));
+    assert(is_terminal_process(L"bash.exe"));
+    assert(is_terminal_process(L"wsl.exe"));
+    assert(!is_terminal_process(L"notepad.exe"));
+    assert(!is_terminal_process(L"1password.exe"));
+
+    // Password managers must be identified as password managers
+    assert(is_password_manager(L"1password.exe"));
+    assert(is_password_manager(L"bitwarden.exe"));
+    assert(is_password_manager(L"keepass.exe"));
+    assert(is_password_manager(L"keepassxc.exe"));
+    assert(!is_password_manager(L"cmd.exe"));
+    assert(!is_password_manager(L"powershell.exe"));
+
+    // Code editors
+    assert(is_code_editor(L"code.exe"));
+    assert(is_code_editor(L"devenv.exe"));
+    assert(is_code_editor(L"sublime_text.exe"));
+    assert(!is_code_editor(L"notepad.exe"));
+
+    // Auto-convert denied: terminals, code editors, password managers
+    assert(is_auto_convert_denied(L"cmd.exe"));
+    assert(is_auto_convert_denied(L"powershell.exe"));
+    assert(is_auto_convert_denied(L"pwsh.exe"));
+    assert(is_auto_convert_denied(L"code.exe"));
+    assert(is_auto_convert_denied(L"1password.exe"));
+    assert(!is_auto_convert_denied(L"notepad.exe"));
+    assert(!is_auto_convert_denied(L"telegram.exe"));
+    assert(!is_auto_convert_denied(L"chrome.exe"));
+
+    std::cout << "[PASS] Input safety and process categorization tests\n";
+}
+
 int main() {
     OleInitialize(nullptr);
     std::cout << "Running RuSwitcher native unit tests...\n";
@@ -314,6 +354,7 @@ int main() {
     test_should_auto_convert();
     test_keystroke_buffer();
     test_trigger_routing();
+    test_input_safety();
     std::cout << "All native unit tests PASSED successfully!\n";
     OleUninitialize();
     return 0;
